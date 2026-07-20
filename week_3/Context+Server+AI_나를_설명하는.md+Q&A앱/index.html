@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>류건우에게 무엇이든 물어보세요 🙋‍♂️</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Gowun Dodum"', '"Noto Sans KR"', 'system-ui', 'sans-serif'],
+            display: ['"Jua"', '"Gowun Dodum"', 'sans-serif'],
+          },
+          keyframes: {
+            popIn: {
+              '0%': { opacity: '0', transform: 'translateY(12px) scale(.96)' },
+              '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+            },
+            floatUp: {
+              '0%': { opacity: '0', transform: 'translateY(8px)' },
+              '100%': { opacity: '1', transform: 'translateY(0)' },
+            },
+            bubbleInL: {
+              '0%': { opacity: '0', transform: 'translateY(10px) translateX(-6px) scale(.97)' },
+              '100%': { opacity: '1', transform: 'translateY(0) translateX(0) scale(1)' },
+            },
+            bubbleInR: {
+              '0%': { opacity: '0', transform: 'translateY(10px) translateX(6px) scale(.97)' },
+              '100%': { opacity: '1', transform: 'translateY(0) translateX(0) scale(1)' },
+            },
+            typingDot: {
+              '0%,80%,100%': { transform: 'translateY(0)', opacity: '.4' },
+              '40%': { transform: 'translateY(-4px)', opacity: '1' },
+            },
+            blob: {
+              '0%,100%': { transform: 'translate(0,0) scale(1)' },
+              '33%': { transform: 'translate(20px,-30px) scale(1.08)' },
+              '66%': { transform: 'translate(-15px,15px) scale(.94)' },
+            },
+          },
+          animation: {
+            popIn: 'popIn .42s cubic-bezier(.2,.8,.25,1) both',
+            floatUp: 'floatUp .35s ease both',
+            bubbleInL: 'bubbleInL .34s cubic-bezier(.2,.8,.25,1) both',
+            bubbleInR: 'bubbleInR .34s cubic-bezier(.2,.8,.25,1) both',
+            blobA: 'blob 14s ease-in-out infinite',
+            blobB: 'blob 18s ease-in-out infinite',
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    html, body, #root { height: 100%; }
+    body { -webkit-font-smoothing: antialiased; }
+    /* slim scrollbar */
+    *::-webkit-scrollbar { width: 9px; height: 9px; }
+    *::-webkit-scrollbar-thumb { background: rgba(124,58,237,.28); border-radius: 9px; }
+    *::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,.45); }
+    /* typing dots */
+    .typing-dot { animation: typingDot 1.2s infinite ease-in-out; }
+    .typing-dot:nth-child(2) { animation-delay: .15s; }
+    .typing-dot:nth-child(3) { animation-delay: .3s; }
+  </style>
+</head>
+<body class="font-sans text-slate-800">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // ========================================
+    // React Hooks
+    // ========================================
+    const { useState, useRef, useEffect, useCallback, useMemo } = React;
+
+    // Same-origin Express server serves this file at "/" and exposes the API here.
+    const API_BASE_URL = '/api';
+
+    // ========================================
+    // Constants
+    // ========================================
+    // Starter questions reflecting the real profile (click → populate + send).
+    const SUGGESTIONS = [
+      { emoji: '💼', text: '건우님은 어떤 일을 하나요?' },
+      { emoji: '🏠', text: '부동산 투자는 어떻게 하고 있어요?' },
+      { emoji: '🍶', text: '‘계영배’는 어떤 곳이에요?' },
+      { emoji: '🏖️', text: '45세 은퇴 목표가 뭐예요?' },
+      { emoji: '🎓', text: '대학원에서 뭘 공부해요?' },
+      { emoji: '👨‍👩‍👧‍👦', text: '가족 구성이 어떻게 되나요?' },
+    ];
+
+    let idSeq = 0;
+    const newId = () => `m${++idSeq}`;
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', className = '', children, ...props }) {
+      const base =
+        'inline-flex items-center justify-center gap-2 font-semibold rounded-2xl transition ' +
+        'focus:outline-none focus-visible:ring-4 focus-visible:ring-violet-300/60 ' +
+        'disabled:opacity-50 disabled:cursor-not-allowed select-none';
+      const sizes = {
+        sm: 'text-sm px-3 py-1.5',
+        md: 'text-sm px-4 py-2.5',
+        lg: 'text-base px-6 py-3.5',
+      };
+      const variants = {
+        primary:
+          'text-white bg-gradient-to-r from-violet-600 via-fuchsia-500 to-pink-500 ' +
+          'shadow-lg shadow-fuchsia-500/30 hover:brightness-110 active:scale-[.98]',
+        secondary:
+          'text-violet-700 bg-white border border-violet-200 hover:bg-violet-50 active:scale-[.98]',
+        ghost: 'text-slate-600 hover:bg-slate-100 active:scale-[.98]',
+        soft: 'text-fuchsia-700 bg-fuchsia-100/70 hover:bg-fuchsia-200/70 active:scale-[.98]',
+      };
+      return (
+        <button className={`${base} ${sizes[size]} ${variants[variant]} ${className}`} {...props}>
+          {children}
+        </button>
+      );
+    }
+
+    // ========================================
+    // 🧩 Sub-components
+    // ========================================
+
+    // The AI avatar (left of assistant bubbles & in header)
+    function Avatar({ size = 'md' }) {
+      const dims = size === 'sm' ? 'w-8 h-8 text-base' : 'w-10 h-10 text-lg';
+      return (
+        <div
+          aria-hidden="true"
+          className={`${dims} shrink-0 rounded-2xl grid place-items-center text-white
+                      bg-gradient-to-br from-violet-500 via-fuchsia-500 to-pink-500
+                      shadow-md shadow-fuchsia-500/30`}
+        >
+          🙋‍♂️
+        </div>
+      );
+    }
+
+    // A single chat row. role: 'user' | 'assistant' | 'error'
+    function MessageBubble({ role, content }) {
+      const isUser = role === 'user';
+      const isError = role === 'error';
+
+      if (isUser) {
+        return (
+          <div className="flex justify-end animate-bubbleInR">
+            <div className="max-w-[82%] sm:max-w-[70%] rounded-3xl rounded-br-lg px-4 py-3
+                            bg-gradient-to-br from-violet-600 to-fuchsia-500 text-white
+                            shadow-lg shadow-fuchsia-500/25 whitespace-pre-wrap break-words
+                            leading-relaxed text-[15px]">
+              {content}
+            </div>
+          </div>
+        );
+      }
+
+      // assistant or error: left-aligned, with avatar
+      return (
+        <div className="flex items-end gap-2.5 animate-bubbleInL">
+          <Avatar />
+          <div
+            className={
+              'max-w-[82%] sm:max-w-[72%] rounded-3xl rounded-bl-lg px-4 py-3 whitespace-pre-wrap ' +
+              'break-words leading-relaxed text-[15px] shadow-sm border ' +
+              (isError
+                ? 'bg-rose-50 border-rose-200 text-rose-700'
+                : 'bg-white/90 border-violet-100 text-slate-700')
+            }
+            role={isError ? 'alert' : undefined}
+          >
+            {isError && <span className="mr-1.5" aria-hidden="true">⚠️</span>}
+            {content}
+          </div>
+        </div>
+      );
+    }
+
+    // "생각 중…" typing indicator shown while a request is in flight
+    function TypingBubble() {
+      return (
+        <div className="flex items-end gap-2.5 animate-bubbleInL" aria-live="polite" aria-label="답변 생성 중">
+          <Avatar />
+          <div className="rounded-3xl rounded-bl-lg px-4 py-3.5 bg-white/90 border border-violet-100 shadow-sm">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-fuchsia-400 typing-dot" />
+              <span className="w-2 h-2 rounded-full bg-fuchsia-400 typing-dot" />
+              <span className="w-2 h-2 rounded-full bg-fuchsia-400 typing-dot" />
+              <span className="ml-2 text-xs text-slate-400 font-medium">생각 중…</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Empty / welcome state: greeting + suggested question chips
+    function WelcomeState({ onPick, disabled }) {
+      return (
+        <div className="animate-floatUp">
+          <div className="text-center mb-6">
+            <div className="mx-auto w-16 h-16 rounded-3xl grid place-items-center text-3xl
+                            bg-gradient-to-br from-violet-500 via-fuchsia-500 to-pink-500
+                            text-white shadow-lg shadow-fuchsia-500/30 mb-4">
+              👋
+            </div>
+            <h2 className="font-display text-2xl text-violet-700 mb-1">안녕하세요! 무엇이 궁금하세요?</h2>
+            <p className="text-sm text-slate-500 break-keep max-w-sm mx-auto">
+              류건우에 대해 뭐든 물어보세요. 아래 질문을 눌러도 좋아요.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-2xl mx-auto">
+            {SUGGESTIONS.map((s, i) => (
+              <button
+                key={s.text}
+                type="button"
+                disabled={disabled}
+                onClick={() => onPick(s.text)}
+                style={{ animationDelay: `${i * 55}ms` }}
+                className="group text-left rounded-2xl px-4 py-3.5 bg-white/80 border border-violet-100
+                           shadow-sm hover:shadow-md hover:border-fuchsia-300 hover:-translate-y-0.5
+                           active:scale-[.98] transition animate-popIn
+                           disabled:opacity-50 disabled:cursor-not-allowed
+                           focus:outline-none focus-visible:ring-4 focus-visible:ring-violet-300/60
+                           flex items-center gap-3"
+              >
+                <span aria-hidden="true" className="text-xl">{s.emoji}</span>
+                <span className="text-[14px] text-slate-700 font-medium break-keep flex-1">{s.text}</span>
+                <span aria-hidden="true"
+                      className="text-fuchsia-400 opacity-0 group-hover:opacity-100 transition -translate-x-1 group-hover:translate-x-0">
+                  →
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 Main App
+    // ========================================
+    function App() {
+      const [messages, setMessages] = useState([]); // { id, role: 'user'|'assistant'|'error', content }
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      const scrollRef = useRef(null);      // scrolling message viewport
+      const bottomRef = useRef(null);      // sentinel at bottom for auto-scroll
+      const textareaRef = useRef(null);
+      const abortRef = useRef(null);
+
+      const trimmed = input.trim();
+      const canSend = trimmed.length > 0 && !loading;
+      const hasMessages = messages.length > 0;
+
+      // cleanup any in-flight request on unmount
+      useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
+
+      // auto-scroll to newest whenever messages change or typing toggles
+      useEffect(() => {
+        if (bottomRef.current) {
+          bottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+      }, [messages, loading]);
+
+      // auto-grow the textarea up to a max height
+      const autoGrow = useCallback(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+      }, []);
+
+      useEffect(() => { autoGrow(); }, [input, autoGrow]);
+
+      // Core: send a question. `text` defaults to current input (used by chips too).
+      const sendQuestion = useCallback(async (rawText) => {
+        const question = (rawText != null ? rawText : input).trim();
+        if (!question || loading) return;
+
+        // history = all prior turns (user/assistant only), oldest first, excluding errors
+        // and excluding the message currently in flight.
+        const history = messages
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .map((m) => ({ role: m.role, content: m.content }));
+
+        const userMsg = { id: newId(), role: 'user', content: question };
+        setMessages((prev) => [...prev, userMsg]);
+        setInput('');
+        setLoading(true);
+
+        if (abortRef.current) abortRef.current.abort();
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        try {
+          const res = await fetch(`${API_BASE_URL}/ask`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, history }),
+            signal: controller.signal,
+          });
+
+          const data = await res.json().catch(() => null);
+
+          if (!res.ok || !data || data.success !== true) {
+            const msg =
+              (data && data.message) ||
+              (res.status >= 500
+                ? '서버에 문제가 생겼어요. 잠시 후 다시 물어봐 주세요.'
+                : '답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요.');
+            setMessages((prev) => [...prev, { id: newId(), role: 'error', content: msg }]);
+            return;
+          }
+
+          const answer = typeof data.answer === 'string' && data.answer.trim()
+            ? data.answer
+            : '음… 적절한 답을 찾지 못했어요. 다른 방식으로 물어봐 주실래요?';
+          setMessages((prev) => [...prev, { id: newId(), role: 'assistant', content: answer }]);
+        } catch (err) {
+          if (err && err.name === 'AbortError') return; // superseded / unmounted
+          const networkDown = err instanceof TypeError;
+          const msg = networkDown
+            ? '서버에 연결할 수 없어요. 서버(node server.js)가 실행 중인지 확인해 주세요.'
+            : '요청 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요.';
+          setMessages((prev) => [...prev, { id: newId(), role: 'error', content: msg }]);
+        } finally {
+          if (abortRef.current === controller) {
+            setLoading(false);
+            abortRef.current = null;
+          }
+        }
+      }, [input, loading, messages]);
+
+      const handleSubmit = useCallback((e) => {
+        if (e) e.preventDefault();
+        if (!canSend) return;
+        sendQuestion();
+      }, [canSend, sendQuestion]);
+
+      // Enter to send, Shift+Enter for newline
+      const handleKeyDown = useCallback((e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (canSend) sendQuestion();
+        }
+      }, [canSend, sendQuestion]);
+
+      // chip click: populate + send immediately
+      const handlePick = useCallback((text) => {
+        if (loading) return;
+        sendQuestion(text);
+      }, [loading, sendQuestion]);
+
+      const handleReset = useCallback(() => {
+        if (abortRef.current) abortRef.current.abort();
+        abortRef.current = null;
+        setLoading(false);
+        setMessages([]);
+        setInput('');
+        requestAnimationFrame(() => textareaRef.current && textareaRef.current.focus());
+      }, []);
+
+      // ---- render ----
+      return (
+        <div className="relative h-full overflow-hidden bg-gradient-to-br from-violet-50 via-fuchsia-50 to-rose-50">
+          {/* decorative blobs */}
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="absolute -top-24 -left-20 w-80 h-80 rounded-full bg-violet-300/30 blur-3xl animate-blobA" />
+            <div className="absolute top-1/3 -right-24 w-96 h-96 rounded-full bg-fuchsia-300/30 blur-3xl animate-blobB" />
+            <div className="absolute -bottom-32 left-1/4 w-96 h-96 rounded-full bg-rose-300/25 blur-3xl animate-blobA" />
+          </div>
+
+          {/* App shell: header / scroll area / input row, full viewport height */}
+          <div className="relative h-full flex flex-col max-w-3xl mx-auto px-3 sm:px-5">
+            {/* ===== Header ===== */}
+            <header className="pt-5 sm:pt-7 pb-3 animate-floatUp">
+              <div className="rounded-3xl bg-white/70 backdrop-blur-xl border border-white shadow-xl shadow-violet-500/10 px-5 py-4 sm:px-6">
+                <div className="flex items-center gap-3.5">
+                  <Avatar />
+                  <div className="min-w-0 flex-1">
+                    <h1 className="font-display text-xl sm:text-2xl leading-tight text-transparent bg-clip-text
+                                   bg-gradient-to-r from-violet-600 via-fuchsia-500 to-pink-500">
+                      류건우에게 무엇이든 물어보세요 🙋‍♂️
+                    </h1>
+                    <p className="mt-0.5 text-xs sm:text-[13px] text-slate-500 break-keep">
+                      부동산 투자, 커리어, 계영배, 대학원, 가족, 45세 은퇴 계획까지 — 뭐든 답해드려요
+                    </p>
+                  </div>
+                  {hasMessages && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleReset}
+                      className="shrink-0"
+                      aria-label="대화 지우기"
+                      title="대화 지우기"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7"
+                              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      <span className="hidden sm:inline">대화 지우기</span>
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </header>
+
+            {/* ===== Scrolling message list ===== */}
+            <main
+              ref={scrollRef}
+              className="flex-1 min-h-0 overflow-y-auto py-4 space-y-4"
+              aria-live="polite"
+              aria-label="대화 내용"
+            >
+              {!hasMessages && !loading ? (
+                <div className="h-full flex items-center justify-center">
+                  <WelcomeState onPick={handlePick} disabled={loading} />
+                </div>
+              ) : (
+                <>
+                  {messages.map((m) => (
+                    <MessageBubble key={m.id} role={m.role} content={m.content} />
+                  ))}
+                  {loading && <TypingBubble />}
+                </>
+              )}
+              <div ref={bottomRef} />
+            </main>
+
+            {/* ===== Fixed bottom input row ===== */}
+            <div className="pb-4 sm:pb-6 pt-1">
+              <form
+                onSubmit={handleSubmit}
+                className="rounded-3xl bg-white/80 backdrop-blur-xl border border-white shadow-xl shadow-violet-500/10 p-2.5 sm:p-3"
+              >
+                <div className="flex items-end gap-2">
+                  <label htmlFor="chat-input" className="sr-only">질문 입력</label>
+                  <textarea
+                    id="chat-input"
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    rows={1}
+                    placeholder="궁금한 점을 입력하세요… (Enter 전송 · Shift+Enter 줄바꿈)"
+                    className="flex-1 resize-none max-h-40 bg-transparent px-3 py-2.5 text-[15px] leading-relaxed
+                               placeholder:text-slate-400 focus:outline-none"
+                  />
+                  <Button
+                    type="submit"
+                    disabled={!canSend}
+                    className="shrink-0 px-4 py-2.5 sm:px-5"
+                    aria-label="보내기"
+                  >
+                    {loading ? (
+                      <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      </svg>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                          <path d="M5 12l14-7-5 14-3-6-6-1z" stroke="currentColor" strokeWidth="2"
+                                strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <span className="hidden sm:inline">보내기</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+              <p className="text-center text-[11px] text-slate-400 mt-2 px-2 break-keep">
+                AI가 류건우의 프로필을 바탕으로 답변해요 · <code className="px-1 rounded bg-white/60">POST /api/ask</code> 서버가 필요해요
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

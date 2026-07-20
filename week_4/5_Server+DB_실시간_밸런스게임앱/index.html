@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>밸런스 게임 · 실시간 투표</title>
+
+  <!-- React 18 (CDN) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel standalone — 7.x 로 고정 (Babel 8 은 인라인 JSX 를 깨뜨림) -->
+  <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'system-ui', 'sans-serif'] },
+          colors: { apple: { blue: '#0071e3', blueDark: '#0058b8' } },
+        },
+      },
+    };
+  </script>
+  <style>
+    html, body, #root { height: 100%; }
+    body { background: #f5f5f7; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fadeUp { animation: fadeUp .45s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pop { 0% { transform: scale(.94); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    .animate-pop { animation: pop .3s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes livePulse { 0% { box-shadow: 0 0 0 0 rgba(52,199,89,.55); } 70% { box-shadow: 0 0 0 7px rgba(52,199,89,0); } 100% { box-shadow: 0 0 0 0 rgba(52,199,89,0); } }
+    .live-dot { animation: livePulse 1.6s infinite; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const VOTES_KEY = 'bg-my-votes-v1';
+    const VOTER_KEY = 'bg-voter-id';
+    const POLL_MS = 2500;
+
+    // ---------- voter 식별자 (기기별 1개, localStorage 영속) ----------
+    function getVoterId() {
+      let v = localStorage.getItem(VOTER_KEY);
+      if (!v) {
+        v = (window.crypto && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : 'v-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+        localStorage.setItem(VOTER_KEY, v);
+      }
+      return v;
+    }
+    const VOTER_ID = getVoterId();
+
+    // ---------- API ----------
+    async function api(path, options) {
+      const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error((json && json.message) || '요청을 처리하지 못했습니다.');
+      return json.data;
+    }
+
+    // ---------- helpers ----------
+    const loadVotes = () => { try { return JSON.parse(localStorage.getItem(VOTES_KEY)) || {}; } catch { return {}; } };
+    const saveVotes = (v) => { try { localStorage.setItem(VOTES_KEY, JSON.stringify(v)); } catch {} };
+    const pctOf = (a, b) => {
+      const t = (a || 0) + (b || 0);
+      if (t === 0) return [50, 50];
+      const pa = Math.round((a / t) * 100);
+      return [pa, 100 - pa];
+    };
+    const fmt = (n) => (n || 0).toLocaleString('ko-KR');
+
+    // ============================================================
+    // 선택지 한쪽 (A 또는 B)
+    // ============================================================
+    function OptionHalf({ side, text, pct, votes, voted, chosen, isWinner, onPick }) {
+      const c = side === 'a'
+        ? { from: 'from-blue-50', to: 'to-indigo-50', bar: 'bg-apple-blue', ring: 'ring-apple-blue', txt: 'text-apple-blue' }
+        : { from: 'from-rose-50', to: 'to-orange-50', bar: 'bg-rose-500', ring: 'ring-rose-500', txt: 'text-rose-500' };
+      return (
+        <button
+          type="button"
+          onClick={voted ? undefined : onPick}
+          disabled={voted}
+          className={[
+            'group relative w-full overflow-hidden rounded-3xl bg-gradient-to-br p-5 sm:p-6 text-left transition-all duration-300',
+            c.from, c.to, 'border border-black/5',
+            voted
+              ? (chosen ? 'ring-2 ' + c.ring + ' shadow-lg' : 'opacity-80')
+              : 'shadow-sm hover:shadow-xl hover:-translate-y-0.5 active:scale-[.99] cursor-pointer',
+          ].join(' ')}
+        >
+          <div className="flex items-start justify-between gap-2 min-h-[1.75rem]">
+            {voted && chosen && (
+              <span className="animate-pop inline-flex items-center gap-1 rounded-full bg-white/85 px-2.5 py-0.5 text-xs font-semibold text-gray-700 backdrop-blur">✓ 내 선택</span>
+            )}
+            {voted && isWinner && !chosen && (
+              <span className="animate-pop inline-flex items-center gap-1 rounded-full bg-white/70 px-2.5 py-0.5 text-xs font-semibold text-gray-600 backdrop-blur">👑 다수</span>
+            )}
+          </div>
+
+          <p className="mt-2 text-lg sm:text-xl font-semibold tracking-tight text-gray-900 leading-snug break-keep">{text}</p>
+
+          <div className={'mt-4 transition-opacity duration-500 ' + (voted ? 'opacity-100' : 'opacity-0 h-0 mt-0 overflow-hidden')}>
+            <div className="flex items-end justify-between mb-1.5">
+              <span className={'text-2xl sm:text-3xl font-bold tracking-tight ' + c.txt}>{voted ? pct + '%' : '0%'}</span>
+              <span className="text-xs font-medium text-gray-500">{fmt(votes)}표</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-black/10">
+              <div className={'h-full rounded-full ' + c.bar + ' transition-[width] duration-700 ease-out'} style={{ width: (voted ? pct : 0) + '%' }} />
+            </div>
+          </div>
+        </button>
+      );
+    }
+
+    // ============================================================
+    // 질문 카드 (A vs B)
+    // ============================================================
+    function QuestionCard({ q, tally, myChoice, onVote, isNew }) {
+      const voted = !!myChoice;
+      const a = tally.votes_a || 0, b = tally.votes_b || 0;
+      const total = a + b;
+      const [pa, pb] = pctOf(a, b);
+
+      return (
+        <div className={'rounded-[28px] bg-white p-4 sm:p-5 shadow-sm ' + (isNew ? 'animate-fadeUp' : '')}>
+          <div className="relative grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <OptionHalf side="a" text={q.option_a} pct={pa} votes={a} voted={voted}
+              chosen={myChoice === 'a'} isWinner={voted && a >= b} onPick={() => onVote(q.id, 'a')} />
+            <OptionHalf side="b" text={q.option_b} pct={pb} votes={b} voted={voted}
+              chosen={myChoice === 'b'} isWinner={voted && b > a} onPick={() => onVote(q.id, 'b')} />
+            <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gray-900 text-white text-sm font-bold shadow-lg ring-4 ring-white">VS</div>
+            </div>
+          </div>
+
+          <div className="mt-3.5 flex items-center justify-center text-sm">
+            {voted ? (
+              <div className="flex items-center gap-2 text-gray-500">
+                <span className="live-dot inline-block h-2 w-2 rounded-full bg-[#34c759]" />
+                <span className="font-medium">실시간 집계</span>
+                <span className="text-gray-300">·</span>
+                <span className="tabular-nums">총 {fmt(total)}명 참여</span>
+              </div>
+            ) : (
+              <span className="text-gray-400 font-medium">둘 중 하나를 탭해 투표하세요</span>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // 질문 등록 모달
+    // ============================================================
+    function CreateModal({ onClose, onCreate }) {
+      const [a, setA] = useState('');
+      const [b, setB] = useState('');
+      const [busy, setBusy] = useState(false);
+      const [err, setErr] = useState(null);
+      const ref = useRef(null);
+      useEffect(() => { if (ref.current) ref.current.focus(); }, []);
+
+      const submit = async () => {
+        if (!a.trim() || !b.trim() || busy) return;
+        setBusy(true); setErr(null);
+        try { await onCreate(a.trim(), b.trim()); }
+        catch (e) { setErr(e.message); setBusy(false); }
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-sm p-0 sm:p-6" onClick={onClose}>
+          <div className="animate-fadeUp w-full sm:max-w-md rounded-t-[28px] sm:rounded-[28px] bg-white p-6 sm:p-7 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold tracking-tight text-gray-900">새 밸런스 게임 만들기</h3>
+            <p className="mt-1 text-sm text-gray-500">고민되는 두 선택지를 입력하세요.</p>
+
+            <div className="mt-5 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-apple-blue mb-1.5">선택지 A</label>
+                <input ref={ref} value={a} onChange={(e) => setA(e.target.value)} maxLength={100}
+                  placeholder="예) 🍜 평생 라면만 먹기"
+                  className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-base text-gray-900 outline-none transition focus:border-apple-blue focus:bg-white focus:ring-2 focus:ring-apple-blue/20" />
+              </div>
+              <div className="flex justify-center"><span className="text-xs font-bold text-gray-400">VS</span></div>
+              <div>
+                <label className="block text-xs font-semibold text-rose-500 mb-1.5">선택지 B</label>
+                <input value={b} onChange={(e) => setB(e.target.value)} maxLength={100}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+                  placeholder="예) 🍗 평생 치킨만 먹기"
+                  className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-base text-gray-900 outline-none transition focus:border-rose-400 focus:bg-white focus:ring-2 focus:ring-rose-400/20" />
+              </div>
+            </div>
+
+            {err && <p className="mt-3 text-sm text-rose-500">{err}</p>}
+
+            <div className="mt-6 flex gap-3">
+              <button type="button" onClick={onClose}
+                className="flex-1 rounded-full bg-gray-100 px-5 py-3 text-base font-semibold text-gray-600 transition hover:bg-gray-200 active:scale-95">취소</button>
+              <button type="button" onClick={submit} disabled={!a.trim() || !b.trim() || busy}
+                className={'flex-1 rounded-full px-5 py-3 text-base font-semibold text-white transition active:scale-95 ' + ((!a.trim() || !b.trim() || busy) ? 'bg-gray-300 cursor-not-allowed' : 'bg-apple-blue hover:bg-apple-blueDark shadow-lg shadow-apple-blue/25')}>
+                {busy ? '등록 중…' : '등록하기'}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // 루트 앱
+    // ============================================================
+    function App() {
+      const [questions, setQuestions] = useState([]);
+      const [counts, setCounts] = useState({});          // { [id]: { votes_a, votes_b } }
+      const [participants, setParticipants] = useState(0);
+      const [myVotes, setMyVotes] = useState(loadVotes);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [showForm, setShowForm] = useState(false);
+      const newIdRef = useRef(null);
+
+      const setTally = useCallback((list) => {
+        setCounts((prev) => {
+          const next = { ...prev };
+          for (const r of list) next[r.id] = { votes_a: r.votes_a, votes_b: r.votes_b };
+          return next;
+        });
+      }, []);
+
+      const loadAll = useCallback(async () => {
+        setLoading(true); setError(null);
+        try {
+          const data = await api('/api/questions');
+          setQuestions(data.questions);
+          setTally(data.questions.map((q) => ({ id: q.id, votes_a: q.votes_a, votes_b: q.votes_b })));
+          setParticipants(data.totalParticipants);
+        } catch (e) { setError(e.message); }
+        finally { setLoading(false); }
+      }, [setTally]);
+
+      useEffect(() => { loadAll(); }, [loadAll]);
+
+      // 실시간 폴링 — 항상 동작(다른 사람 투표/신규 질문 반영). 모달 열려있을 땐 잠시 멈춤.
+      useEffect(() => {
+        if (loading || error || showForm) return;
+        let alive = true;
+        const t = setInterval(async () => {
+          try {
+            const data = await api('/api/results');
+            if (!alive) return;
+            setTally(data.tallies);
+            setParticipants(data.totalParticipants);
+          } catch {}
+        }, POLL_MS);
+        return () => { alive = false; clearInterval(t); };
+      }, [loading, error, showForm, setTally]);
+
+      // 투표
+      const handleVote = useCallback(async (id, choice) => {
+        if (myVotes[id]) return;
+        const nextVotes = { ...myVotes, [id]: choice };
+        setMyVotes(nextVotes); saveVotes(nextVotes);
+        setCounts((prev) => {
+          const cur = prev[id] || { votes_a: 0, votes_b: 0 };
+          const key = choice === 'a' ? 'votes_a' : 'votes_b';
+          return { ...prev, [id]: { ...cur, [key]: (cur[key] || 0) + 1 } };
+        });
+        setParticipants((p) => p + 1); // 낙관적(이 기기 첫 투표 가정)
+        try {
+          const data = await api('/api/questions/' + id + '/vote', { method: 'POST', body: JSON.stringify({ choice, voter_id: VOTER_ID }) });
+          setCounts((prev) => ({ ...prev, [id]: { votes_a: data.votes_a, votes_b: data.votes_b } }));
+        } catch (e) { console.warn('vote failed:', e.message); }
+      }, [myVotes]);
+
+      // 질문 등록
+      const handleCreate = useCallback(async (a, b) => {
+        const q = await api('/api/questions', { method: 'POST', body: JSON.stringify({ option_a: a, option_b: b }) });
+        newIdRef.current = q.id;
+        setQuestions((prev) => [q, ...prev]);
+        setCounts((prev) => ({ ...prev, [q.id]: { votes_a: 0, votes_b: 0 } }));
+        setShowForm(false);
+      }, []);
+
+      // ----- 렌더 -----
+      if (error) {
+        return (
+          <div className="flex min-h-full flex-col items-center justify-center px-6 text-center">
+            <div className="text-5xl mb-4">😵</div>
+            <p className="text-lg font-semibold text-gray-900">서버에 연결하지 못했어요</p>
+            <p className="mt-2 text-sm text-gray-500 max-w-sm">{error}</p>
+            <button onClick={loadAll} className="mt-6 rounded-full bg-apple-blue px-7 py-3 text-base font-semibold text-white shadow-lg active:scale-95">다시 시도</button>
+          </div>
+        );
+      }
+
+      return (
+        <div className="mx-auto w-full max-w-2xl px-4 sm:px-5 pb-24">
+          {/* 헤더 */}
+          <header className="pt-9 pb-6 text-center">
+            <div className="text-5xl mb-3 select-none">⚖️</div>
+            <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-gray-900">밸런스 게임</h1>
+            <p className="mt-2.5 text-base text-gray-500">둘 중 하나, 당신의 선택은?</p>
+            <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 shadow-sm">
+              <span className="live-dot inline-block h-2 w-2 rounded-full bg-[#34c759]" />
+              <span className="text-sm font-semibold text-gray-700 tabular-nums">{fmt(participants)}명</span>
+              <span className="text-sm text-gray-400">참여 중</span>
+            </div>
+          </header>
+
+          {/* 질문 만들기 버튼 */}
+          <div className="mb-5">
+            <button type="button" onClick={() => setShowForm(true)}
+              className="w-full rounded-2xl border-2 border-dashed border-gray-300 bg-white/50 py-4 text-base font-semibold text-gray-500 transition hover:border-apple-blue hover:text-apple-blue active:scale-[.99]">
+              ＋ 새 밸런스 게임 만들기
+            </button>
+          </div>
+
+          {/* 목록 */}
+          {loading ? (
+            <div className="space-y-4">
+              {[0, 1, 2].map((i) => <div key={i} className="h-44 rounded-[28px] bg-white/60 animate-pulse" />)}
+            </div>
+          ) : questions.length === 0 ? (
+            <div className="rounded-[28px] bg-white p-10 text-center shadow-sm">
+              <div className="text-4xl mb-3">🤔</div>
+              <p className="text-gray-500">아직 질문이 없어요. 첫 질문을 만들어 보세요!</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {questions.map((q) => (
+                <QuestionCard key={q.id} q={q}
+                  tally={counts[q.id] || { votes_a: q.votes_a, votes_b: q.votes_b }}
+                  myChoice={myVotes[q.id]} onVote={handleVote}
+                  isNew={String(newIdRef.current) === String(q.id)} />
+              ))}
+            </div>
+          )}
+
+          {showForm && <CreateModal onClose={() => setShowForm(false)} onCreate={handleCreate} />}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: 1920px; height: 1080px; overflow: hidden; background: #0B0E14; }
+
+  .stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+
+  /* 배경: 인물 뒤 온광 + 미세 그리드 (AI/데이터 뉘앙스, 카피를 방해하지 않게 아주 약하게) */
+  .glow {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 90% at 78% 62%, rgba(230,0,18,.42) 0%, rgba(230,0,18,.10) 42%, rgba(0,0,0,0) 68%),
+      radial-gradient(70% 60% at 20% 20%, rgba(60,90,140,.22) 0%, rgba(0,0,0,0) 70%);
+  }
+  .grid {
+    position: absolute; inset: 0; opacity: .10;
+    background-image:
+      linear-gradient(rgba(255,255,255,.55) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.55) 1px, transparent 1px);
+    background-size: 96px 96px;
+    mask-image: radial-gradient(80% 70% at 50% 50%, #000 30%, transparent 78%);
+  }
+  .vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(110% 80% at 50% 45%, transparent 45%, rgba(0,0,0,.72) 100%);
+  }
+
+  /* 인물 — 오른쪽 가장자리에 붙이고 하단은 프레임 밖으로 흘림 */
+  .person {
+    position: absolute; right: -26px; bottom: -8px;
+    height: 985px; width: auto;
+    filter: drop-shadow(0 26px 46px rgba(0,0,0,.72)) contrast(1.06) saturate(1.06);
+  }
+
+  /* 카피 존 */
+  .copy {
+    position: absolute; left: 92px; top: 0; bottom: 0; width: 900px;
+    display: flex; flex-direction: column; justify-content: center;
+    word-break: keep-all;
+  }
+
+  .kicker {
+    display: inline-flex; align-self: flex-start; align-items: center; gap: 14px;
+    font-family: 'Pretendard', sans-serif; font-weight: 800; font-size: 44px;
+    letter-spacing: .01em; color: #fff;
+    background: #E60012; padding: 15px 28px; border-radius: 8px;
+    margin-bottom: 34px;
+  }
+  .kicker b { font-weight: 900; }
+
+  .main {
+    font-family: 'Black Han Sans', sans-serif;
+    font-size: 208px; line-height: 1.02; color: #fff;
+    letter-spacing: -.022em;
+    -webkit-text-stroke: 11px #0B0E14;
+    paint-order: stroke fill;          /* ← 없으면 한글 자소가 메워진다 (thumnail.md §4) */
+    text-shadow: 0 12px 34px rgba(0,0,0,.62);
+  }
+  .em { color: #FFE100; }
+
+  .rule { width: 176px; height: 9px; background: #FFE100; margin: 32px 0 24px; border-radius: 4px; }
+
+  .sub {
+    font-family: 'Pretendard', sans-serif; font-weight: 800; font-size: 47px;
+    color: #DCE2EA; letter-spacing: -.01em; line-height: 1.32;
+    text-shadow: 0 6px 18px rgba(0,0,0,.7);
+  }
+  .sub i { font-style: normal; color: #fff; }
+</style>
+
+<div class="stage">
+  <div class="glow"></div>
+  <div class="grid"></div>
+  <img class="person" src="source/chey-trim.png" alt="">
+  <div class="vignette" style="mix-blend-mode:multiply;opacity:.55"></div>
+
+  <div class="copy">
+    <div class="kicker">KBS 다큐 인사이트 · <b>인재전쟁 2</b></div>
+    <div class="main"><span class="em">전문직</span>이<br>사라진다</div>
+    <div class="rule"></div>
+    <div class="sub">최태원 회장이 말하는<br><i>AI 시대, 대한민국 생존 전략</i></div>
+  </div>
+</div>

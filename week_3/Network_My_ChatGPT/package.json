@@ -1,0 +1,13 @@
+{
+  "name": "my-chatgpt-estj",
+  "version": "1.0.0",
+  "description": "나만의 ChatGPT — ESTJ 고용노동부 교육훈련 전문 상담관. OpenAI Chat Completions를 서버에서 프록시하는 zero-dependency Node 백엔드 + React(CDN) 프론트",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

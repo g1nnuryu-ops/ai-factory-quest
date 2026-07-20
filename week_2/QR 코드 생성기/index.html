@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QR 코드 생성기 - ARCADE</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'Press Start 2P', monospace;
+    background: #000;
+    color: #ffe600;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow-x: hidden;
+    background-image:
+      linear-gradient(rgba(0,0,255,0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,255,0.08) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  .cabinet {
+    width: 100%;
+    max-width: 520px;
+    border: 4px solid #2121ff;
+    border-radius: 12px;
+    padding: 28px 24px;
+    background: #07071a;
+    box-shadow:
+      0 0 0 4px #000,
+      0 0 24px rgba(33,33,255,0.6),
+      inset 0 0 30px rgba(33,33,255,0.15);
+    position: relative;
+  }
+
+  .title {
+    text-align: center;
+    font-size: 22px;
+    color: #ffe600;
+    text-shadow: 3px 3px 0 #2121ff;
+    line-height: 1.6;
+    margin-bottom: 6px;
+  }
+
+  .subtitle {
+    text-align: center;
+    font-size: 9px;
+    color: #ff5fff;
+    margin-bottom: 22px;
+    letter-spacing: 1px;
+  }
+
+  /* 팩맨 + 도트 줄 */
+  .maze {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 22px;
+    justify-content: center;
+  }
+
+  .pacman {
+    width: 26px;
+    height: 26px;
+    background: #ffe600;
+    border-radius: 50%;
+    position: relative;
+    animation: chomp 0.4s linear infinite;
+  }
+
+  @keyframes chomp {
+    0%, 100% { clip-path: polygon(100% 25%, 44% 50%, 100% 75%, 100% 100%, 0 100%, 0 0, 100% 0); }
+    50%      { clip-path: polygon(100% 50%, 44% 50%, 100% 50%, 100% 100%, 0 100%, 0 0, 100% 0); }
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    background: #ffb8ff;
+    border-radius: 50%;
+    animation: blink 1s steps(2) infinite;
+  }
+  .dot:nth-child(3){ animation-delay: .1s }
+  .dot:nth-child(4){ animation-delay: .2s }
+  .dot:nth-child(5){ animation-delay: .3s }
+  .dot:nth-child(6){ animation-delay: .4s }
+
+  @keyframes blink { 50% { opacity: .25 } }
+
+  .ghost {
+    width: 24px;
+    height: 24px;
+    margin-left: auto;
+  }
+
+  label {
+    display: block;
+    font-size: 10px;
+    color: #00ffff;
+    margin-bottom: 10px;
+  }
+
+  textarea {
+    width: 100%;
+    background: #000;
+    border: 3px solid #ffe600;
+    color: #ffe600;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    padding: 12px;
+    resize: vertical;
+    min-height: 70px;
+    line-height: 1.6;
+    outline: none;
+    margin-bottom: 18px;
+  }
+  textarea:focus {
+    border-color: #ff5fff;
+    box-shadow: 0 0 12px rgba(255,95,255,0.6);
+  }
+  textarea::placeholder { color: #555; }
+
+  .btn-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+
+  button {
+    flex: 1;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    padding: 14px 8px;
+    border: 3px solid #000;
+    cursor: pointer;
+    color: #000;
+    transition: transform .05s, box-shadow .1s;
+  }
+  button:active { transform: translateY(3px); }
+
+  .btn-gen {
+    background: #ffe600;
+    box-shadow: 0 4px 0 #b39b00;
+  }
+  .btn-gen:active { box-shadow: 0 1px 0 #b39b00; }
+
+  .btn-dl {
+    background: #ff5fff;
+    box-shadow: 0 4px 0 #a33aa3;
+  }
+  .btn-dl:active { box-shadow: 0 1px 0 #a33aa3; }
+  .btn-dl:disabled {
+    background: #444;
+    color: #777;
+    box-shadow: 0 4px 0 #222;
+    cursor: not-allowed;
+  }
+
+  .screen {
+    background: #000;
+    border: 3px solid #2121ff;
+    padding: 20px;
+    min-height: 240px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  #qrcode {
+    padding: 12px;
+    background: #fff;
+    border-radius: 4px;
+    line-height: 0;
+  }
+  #qrcode img, #qrcode canvas { display: block; }
+
+  .hint {
+    font-size: 9px;
+    color: #00ffff;
+    text-align: center;
+    line-height: 1.8;
+    animation: blink 1.2s steps(2) infinite;
+  }
+
+  .footer {
+    text-align: center;
+    font-size: 8px;
+    color: #2121ff;
+    margin-top: 18px;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+  <div class="cabinet">
+    <div class="title">QR MAKER</div>
+    <div class="subtitle">★ INSERT TEXT TO PLAY ★</div>
+
+    <div class="maze">
+      <div class="pacman"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <svg class="ghost" viewBox="0 0 24 24">
+        <path d="M2 22V10a10 10 0 0 1 20 0v12l-3-2-3 2-4-2-4 2-3-2z" fill="#ff0000"/>
+        <circle cx="8" cy="10" r="3" fill="#fff"/>
+        <circle cx="16" cy="10" r="3" fill="#fff"/>
+        <circle cx="9" cy="11" r="1.4" fill="#2121ff"/>
+        <circle cx="17" cy="11" r="1.4" fill="#2121ff"/>
+      </svg>
+    </div>
+
+    <label>&gt; URL 또는 텍스트 입력</label>
+    <textarea id="text" placeholder="https://example.com"></textarea>
+
+    <div class="btn-row">
+      <button class="btn-gen" onclick="generate()">GENERATE</button>
+      <button class="btn-dl" id="dlBtn" onclick="download()" disabled>DOWNLOAD</button>
+    </div>
+
+    <div class="screen">
+      <div id="qrcode"></div>
+      <div class="hint" id="hint">PRESS GENERATE</div>
+    </div>
+
+    <div class="footer">© 1980 ARCADE QR CO.</div>
+  </div>
+
+<script>
+  let qr = null;
+
+  function generate() {
+    const text = document.getElementById('text').value.trim();
+    const box = document.getElementById('qrcode');
+    const hint = document.getElementById('hint');
+    const dlBtn = document.getElementById('dlBtn');
+
+    box.innerHTML = '';
+
+    if (!text) {
+      hint.textContent = 'GAME OVER - 텍스트 없음';
+      hint.style.color = '#ff0000';
+      dlBtn.disabled = true;
+      return;
+    }
+
+    qr = new QRCode(box, {
+      text: text,
+      width: 200,
+      height: 200,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.H
+    });
+
+    hint.textContent = 'STAGE CLEAR! 스캔하세요';
+    hint.style.color = '#00ffff';
+    dlBtn.disabled = false;
+  }
+
+  function download() {
+    const img = document.querySelector('#qrcode img') || document.querySelector('#qrcode canvas');
+    if (!img) return;
+
+    let dataUrl;
+    if (img.tagName === 'CANVAS') {
+      dataUrl = img.toDataURL('image/png');
+    } else {
+      dataUrl = img.src;
+    }
+
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = 'qrcode.png';
+    a.click();
+  }
+
+  // 엔터(Ctrl+Enter)로 생성
+  document.getElementById('text').addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'Enter') generate();
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+# 비밀 — DB 연결 문자열 (절대 커밋 금지)
+.env
+.env.*
+
+# 의존성
+node_modules/
+
+# 로그 / 임시
+*.log
+_smoke.js
+_dbcheck.js

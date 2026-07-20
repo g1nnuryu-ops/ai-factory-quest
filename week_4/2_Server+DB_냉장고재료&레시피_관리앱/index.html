@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>우리집 냉장고 · 식재료 & 레시피 관리</title>
+
+  <!-- Tailwind Play CDN (version pinned) -->
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+
+  <!--
+    ⚠️ 모든 CDN은 버전을 명시적으로 고정한다.
+    @babel/standalone 은 반드시 7.x 로 핀. 8.x 는 inline type="text/babel" 변환이 깨진다.
+    React / ReactDOM 도 정확한 버전으로 핀.
+  -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+
+  <style>
+    /* Tailwind 유틸리티로 표현하기 어려운 항목만 최소한으로 */
+    html { scroll-behavior: smooth; }
+    body { -webkit-tap-highlight-color: transparent; }
+
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(8px) scale(0.98); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .card-in { animation: card-in 0.22s ease-out both; }
+
+    @keyframes modal-in {
+      from { opacity: 0; transform: translateY(16px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .modal-in { animation: modal-in 0.2s ease-out both; }
+
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    .fade-in { animation: fade-in 0.18s ease-out both; }
+
+    /* 커스텀 스크롤바 (모달 내부 등) */
+    .nice-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .nice-scroll::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 9999px; }
+    .nice-scroll::-webkit-scrollbar-track { background: transparent; }
+
+    .line-clamp-2 {
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+  </style>
+</head>
+<body class="bg-amber-50/40 text-stone-800 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    // ========================================
+    // ⚛️ React Hooks
+    // ========================================
+    const { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } = React;
+
+    // ========================================
+    // 🗄️ 데이터 접근 계층 (Data Access Layer) — REST API 기반
+    //   - 모든 데이터(식재료 + 레시피)는 PostgreSQL(Supabase)에 저장되고
+    //     server.js 의 /api 엔드포인트를 통해 CRUD 한다.
+    //   - origin 기반 BASE URL (localhost 하드코딩 금지 — 배포 환경 호환).
+    //   - 서버 응답 봉투: { success, data } / 실패 시 { success:false, message }.
+    // ========================================
+    const API_BASE_URL = window.location.origin + '/api';
+
+    // 공통 fetch 래퍼: {success,data} 를 풀어 data 를 반환, 실패하면 서버 message 로 throw.
+    async function apiRequest(path, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      let payload = null;
+      try { payload = await res.json(); } catch (_e) { /* 비-JSON 응답 */ }
+      if (!res.ok || !payload || payload.success !== true) {
+        const msg = (payload && payload.message) || `요청에 실패했습니다 (HTTP ${res.status}).`;
+        throw new Error(msg);
+      }
+      return payload.data;
+    }
+
+    const apiList   = (resource)        => apiRequest(`/${resource}`);
+    const apiCreate = (resource, body)  => apiRequest(`/${resource}`, { method: 'POST', body: JSON.stringify(body) });
+    const apiUpdate = (resource, id, b) => apiRequest(`/${resource}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(b) });
+    const apiDelete = (resource, id)    => apiRequest(`/${resource}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+    // 클라이언트측 id 생성 (레시피 신규 등록 시 사용 — 서버도 누락 시 보강함)
+    let _idSeq = 0;
+    const newId = (prefix) => `${prefix || 'item'}_${Date.now().toString(36)}_${(++_idSeq).toString(36)}`;
+
+    // ========================================
+    // 🧰 도메인 유틸 (카테고리/보관/소비기한/이모지)
+    // ========================================
+    const CATEGORY_OPTIONS = ['채소','육류','유제품','과일','양념','발효식품','곡류','단백질·달걀','콩가공품','버섯','해조·반찬','유지·양념','가공식품'];
+    const STORAGE_OPTIONS = ['냉장','냉동','실온'];
+
+    // 카테고리 키워드 → 이모지
+    function categoryEmoji(cat = '', name = '') {
+      const c = cat + ' ' + name;
+      if (/달걀|계란/.test(c)) return '🥚';
+      if (/우유|치즈|요거트|유제품|버터/.test(c)) return '🧀';
+      if (/육류|고기/.test(c)) return '🥩';
+      if (/콩가공|두부/.test(c)) return '🍶';
+      if (/버섯/.test(c)) return '🍄';
+      if (/발효|김치/.test(c)) return '🥬';
+      if (/해조|김/.test(c)) return '🍙';
+      if (/곡류|쌀|주식/.test(c)) return '🍚';
+      if (/장류|간장|양념|조미료/.test(c)) return '🧂';
+      if (/유지|기름/.test(c)) return '🫙';
+      if (/과일/.test(c)) {
+        if (/사과/.test(name)) return '🍎';
+        if (/딸기/.test(name)) return '🍓';
+        if (/바나나/.test(name)) return '🍌';
+        return '🍑';
+      }
+      if (/채소|뿌리|엽채|향신|양념채소|서류/.test(c)) {
+        if (/당근/.test(name)) return '🥕';
+        if (/감자/.test(name)) return '🥔';
+        if (/양파/.test(name)) return '🧅';
+        if (/마늘/.test(name)) return '🧄';
+        if (/시금치|배추|양배추/.test(name)) return '🥬';
+        if (/대파|파/.test(name)) return '🌿';
+        return '🥦';
+      }
+      return '🍽️';
+    }
+
+    // 소비기한(남은 일수)에 따른 등급
+    function expiryLevel(days) {
+      const d = Number(days);
+      if (!isFinite(d)) return { key:'none', label:'정보없음', tone:'slate' };
+      if (d <= 3) return { key:'soon', label:'임박', tone:'red' };
+      if (d <= 7) return { key:'warn', label:'주의', tone:'amber' };
+      return { key:'fresh', label:'여유', tone:'emerald' };
+    }
+
+    const TONE = {
+      red:    { badge:'bg-red-100 text-red-700 ring-red-200', dot:'bg-red-500', soft:'bg-red-50 border-red-200', text:'text-red-700' },
+      amber:  { badge:'bg-amber-100 text-amber-800 ring-amber-200', dot:'bg-amber-500', soft:'bg-amber-50 border-amber-200', text:'text-amber-800' },
+      emerald:{ badge:'bg-emerald-100 text-emerald-700 ring-emerald-200', dot:'bg-emerald-500', soft:'bg-emerald-50 border-emerald-200', text:'text-emerald-700' },
+      slate:  { badge:'bg-slate-100 text-slate-600 ring-slate-200', dot:'bg-slate-400', soft:'bg-slate-50 border-slate-200', text:'text-slate-600' },
+    };
+
+    // 콤마 입력 ↔ 배열
+    const arrToText = (a) => (Array.isArray(a) ? a.join(', ') : '');
+    const textToArr = (t) => String(t || '').split(',').map(s => s.trim()).filter(Boolean);
+
+    // ========================================
+    // 🎨 디자인 시스템 컴포넌트 (순수 프레젠테이션)
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', className = '', disabled, children, ...rest }) {
+      const base = 'inline-flex items-center justify-center gap-1.5 font-semibold rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed select-none';
+      const sizes = { sm:'text-sm px-3 py-1.5', md:'text-sm px-4 py-2.5', lg:'text-base px-5 py-3' };
+      const variants = {
+        primary:  'bg-orange-500 text-white hover:bg-orange-600 active:bg-orange-700 focus-visible:ring-orange-400 shadow-sm',
+        secondary:'bg-white text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50 focus-visible:ring-orange-300',
+        danger:   'bg-red-500 text-white hover:bg-red-600 active:bg-red-700 focus-visible:ring-red-400 shadow-sm',
+        ghost:    'bg-transparent text-stone-600 hover:bg-stone-100 focus-visible:ring-stone-300',
+      };
+      return (
+        <button className={`${base} ${sizes[size]} ${variants[variant]} ${className}`} disabled={disabled} {...rest}>
+          {children}
+        </button>
+      );
+    }
+
+    const Input = React.forwardRef(function Input({ label, error, className = '', id, ...rest }, ref) {
+      const inputId = id || rest.name;
+      return (
+        <label className="block">
+          {label && <span className="mb-1 block text-sm font-semibold text-stone-700">{label}</span>}
+          <input
+            ref={ref}
+            id={inputId}
+            className={`w-full rounded-xl border bg-white px-3 py-2.5 text-sm text-stone-800 placeholder-stone-400 transition focus:outline-none focus:ring-2 ${error ? 'border-red-300 focus:ring-red-300' : 'border-stone-200 focus:ring-orange-300'} ${className}`}
+            {...rest}
+          />
+          {error && <span className="mt-1 block text-xs font-medium text-red-600">{error}</span>}
+        </label>
+      );
+    });
+
+    function Textarea({ label, className = '', ...rest }) {
+      return (
+        <label className="block">
+          {label && <span className="mb-1 block text-sm font-semibold text-stone-700">{label}</span>}
+          <textarea
+            className={`w-full resize-y rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 placeholder-stone-400 transition focus:outline-none focus:ring-2 focus:ring-orange-300 ${className}`}
+            {...rest}
+          />
+        </label>
+      );
+    }
+
+    function Select({ label, className = '', children, ...rest }) {
+      return (
+        <label className="block">
+          {label && <span className="mb-1 block text-sm font-semibold text-stone-700">{label}</span>}
+          <select
+            className={`w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 transition focus:outline-none focus:ring-2 focus:ring-orange-300 ${className}`}
+            {...rest}
+          >
+            {children}
+          </select>
+        </label>
+      );
+    }
+
+    function Card({ className = '', children, ...rest }) {
+      return (
+        <div className={`rounded-2xl bg-white shadow-sm ring-1 ring-stone-100 ${className}`} {...rest}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ tone = 'slate', className = '', children }) {
+      const t = TONE[tone] || TONE.slate;
+      return (
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${t.badge} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Chip({ className = '', children }) {
+      return (
+        <span className={`inline-flex items-center rounded-md bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600 ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    // 아이선호도 ★ 별점 (읽기 전용 표시)
+    function Stars({ value, outOf = 5, className = '', label }) {
+      if (value == null) {
+        return <span className={`text-xs font-medium text-stone-400 ${className}`}>해당 없음</span>;
+      }
+      const v = Number(value);
+      return (
+        <span className={`inline-flex items-center gap-0.5 ${className}`} aria-label={`${label || '선호도'} ${v}점 / ${outOf}점`} title={`${v} / ${outOf}`}>
+          {Array.from({ length: outOf }).map((_, i) => (
+            <span key={i} className={i < v ? 'text-amber-400' : 'text-stone-300'} aria-hidden="true">★</span>
+          ))}
+        </span>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, children, size = 'md', footer }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        document.addEventListener('keydown', onKey);
+        document.body.style.overflow = 'hidden';
+        return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      const widths = { sm:'max-w-md', md:'max-w-lg', lg:'max-w-2xl', xl:'max-w-3xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 p-0 fade-in sm:items-center sm:p-4" onMouseDown={onClose} role="dialog" aria-modal="true" aria-label={title}>
+          <div
+            className={`modal-in flex max-h-[92vh] w-full ${widths[size]} flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-2xl`}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4 border-b border-stone-100 px-5 py-4">
+              <h2 className="text-lg font-bold text-stone-800">{title}</h2>
+              <button onClick={onClose} aria-label="닫기" className="rounded-lg p-1.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-600">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div className="nice-scroll flex-1 overflow-y-auto px-5 py-4">{children}</div>
+            {footer && <div className="border-t border-stone-100 bg-stone-50/60 px-5 py-3">{footer}</div>}
+          </div>
+        </div>
+      );
+    }
+
+    function EmptyState({ emoji = '🍽️', title, desc, action }) {
+      return (
+        <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-stone-200 bg-white/60 px-6 py-16 text-center">
+          <div className="mb-3 text-5xl" aria-hidden="true">{emoji}</div>
+          <h3 className="text-base font-bold text-stone-700">{title}</h3>
+          {desc && <p className="mt-1 max-w-xs text-sm text-stone-500">{desc}</p>}
+          {action && <div className="mt-4">{action}</div>}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🔀 해시 라우팅 (경량)
+    // ========================================
+    const RouterContext = createContext({ path: '/', navigate: () => {} });
+
+    function useHashPath() {
+      const get = () => {
+        const h = window.location.hash.replace(/^#/, '');
+        return h && h.startsWith('/') ? h : '/';
+      };
+      const [path, setPath] = useState(get);
+      useEffect(() => {
+        const onHash = () => setPath(get());
+        window.addEventListener('hashchange', onHash);
+        if (!window.location.hash) window.location.hash = '#/';
+        return () => window.removeEventListener('hashchange', onHash);
+      }, []);
+      const navigate = useCallback((to) => {
+        const target = to.startsWith('#') ? to : `#${to}`;
+        if (window.location.hash !== target) window.location.hash = target;
+        else setPath(get());
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, []);
+      return { path, navigate };
+    }
+
+    const useRouter = () => useContext(RouterContext);
+
+    // ========================================
+    // 🧩 공통 레이아웃 (헤더 / 탭 내비게이션)
+    // ========================================
+    const TABS = [
+      { to:'/',        label:'대시보드', icon:'🏠' },
+      { to:'/fridge',  label:'냉장고',   icon:'🧊' },
+      { to:'/recipes', label:'레시피',   icon:'🍳' },
+    ];
+
+    function Header() {
+      const { path, navigate } = useRouter();
+      const isActive = (to) => (to === '/' ? path === '/' : path.startsWith(to));
+      return (
+        <header className="sticky top-0 z-40 border-b border-stone-200/70 bg-amber-50/80 backdrop-blur supports-[backdrop-filter]:bg-amber-50/60">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+            <button onClick={() => navigate('/')} className="flex items-center gap-2 rounded-xl px-1 py-1 text-left transition hover:opacity-80">
+              <span className="grid h-10 w-10 place-items-center rounded-2xl bg-orange-500 text-xl shadow-sm" aria-hidden="true">🧊</span>
+              <span>
+                <span className="block text-base font-extrabold leading-tight text-stone-800">우리집 냉장고</span>
+                <span className="block text-xs font-medium text-stone-500">식재료 &amp; 레시피 관리</span>
+              </span>
+            </button>
+            <nav aria-label="주요 메뉴" className="flex items-center gap-1 rounded-2xl bg-white/70 p-1 ring-1 ring-stone-200">
+              {TABS.map(t => (
+                <button
+                  key={t.to}
+                  onClick={() => navigate(t.to)}
+                  aria-current={isActive(t.to) ? 'page' : undefined}
+                  className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition ${isActive(t.to) ? 'bg-orange-500 text-white shadow-sm' : 'text-stone-600 hover:bg-stone-100'}`}
+                >
+                  <span aria-hidden="true">{t.icon}</span>
+                  <span className="hidden sm:inline">{t.label}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
+        </header>
+      );
+    }
+
+    // ========================================
+    // 🧊 식재료: 카드 + 폼 모달
+    // ========================================
+    function AllergyChips({ items, size = 'sm' }) {
+      if (!items || items.length === 0) {
+        return <span className="text-xs font-medium text-emerald-600">알레르기 없음 ✅</span>;
+      }
+      const pad = size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm';
+      return (
+        <span className="flex flex-wrap items-center gap-1">
+          {items.map((a, i) => (
+            <span key={i} className={`inline-flex items-center gap-0.5 rounded-md bg-red-100 font-semibold text-red-700 ring-1 ring-inset ring-red-200 ${pad}`}>
+              <span aria-hidden="true">⚠️</span>{a}
+            </span>
+          ))}
+        </span>
+      );
+    }
+
+    function IngredientCard({ item, onEdit, onDelete }) {
+      const lvl = expiryLevel(item.소비기한_일);
+      const t = TONE[lvl.tone];
+      return (
+        <Card className="card-in flex h-full flex-col p-4">
+          <div className="flex items-start gap-3">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-amber-50 text-2xl ring-1 ring-amber-100" aria-hidden="true">
+              {categoryEmoji(item.카테고리, item.이름)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="truncate text-base font-bold text-stone-800" title={item.이름}>{item.이름}</h3>
+                <Badge tone={lvl.tone} className="shrink-0">
+                  <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} aria-hidden="true" />
+                  {lvl.label} · {item.소비기한_일}일
+                </Badge>
+              </div>
+              <p className="mt-0.5 truncate text-xs text-stone-400">{item.영문명}</p>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <Chip>{item.카테고리}</Chip>
+            <Chip className="bg-sky-100 text-sky-700">{item.보관방법}</Chip>
+            <span className="text-sm font-semibold text-stone-700">{item.수량}{item.단위}</span>
+          </div>
+
+          <p className="mt-2 flex items-start gap-1 text-xs text-stone-500">
+            <span aria-hidden="true">📍</span>
+            <span className="line-clamp-2">{item.보관위치}</span>
+          </p>
+
+          {/* 알레르기 & 아이선호도 — 1급 시민 강조 */}
+          <div className="mt-3 space-y-2 rounded-xl bg-stone-50 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-stone-500">알레르기</span>
+              <AllergyChips items={item.알레르기} />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-stone-500">아이 선호도</span>
+              <Stars value={item.아이선호도} label="아이 선호도" />
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2 pt-1">
+            <Button variant="secondary" size="sm" className="flex-1" onClick={() => onEdit(item)}>✏️ 수정</Button>
+            <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50" onClick={() => onDelete(item)} aria-label={`${item.이름} 삭제`}>🗑️ 삭제</Button>
+          </div>
+        </Card>
+      );
+    }
+
+    const EMPTY_INGREDIENT = {
+      id:'', 이름:'', 영문명:'', 수량:1, 단위:'개', 카테고리:'채소', 보관방법:'냉장', 보관위치:'',
+      소비기한_일:7, 알레르기:[], 아이선호도:'', 주요영양소:[], 대표요리:[], 비고:'',
+    };
+
+    function IngredientFormModal({ isOpen, onClose, onSave, initial }) {
+      const isEdit = !!(initial && initial.id);
+      const [form, setForm] = useState(EMPTY_INGREDIENT);
+      const [errors, setErrors] = useState({});
+      const firstRef = useRef(null);
+
+      useEffect(() => {
+        if (!isOpen) return;
+        if (initial) {
+          setForm({
+            ...EMPTY_INGREDIENT, ...initial,
+            알레르기: arrToText(initial.알레르기),
+            주요영양소: arrToText(initial.주요영양소),
+            대표요리: arrToText(initial.대표요리),
+            아이선호도: initial.아이선호도 == null ? '' : String(initial.아이선호도),
+          });
+        } else {
+          setForm({ ...EMPTY_INGREDIENT });
+        }
+        setErrors({});
+        setTimeout(() => firstRef.current && firstRef.current.focus(), 50);
+      }, [isOpen, initial]);
+
+      const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+      const submit = (e) => {
+        e.preventDefault();
+        const errs = {};
+        if (!String(form.이름).trim()) errs.이름 = '이름을 입력해 주세요.';
+        if (form.수량 === '' || isNaN(Number(form.수량)) || Number(form.수량) < 0) errs.수량 = '0 이상 숫자';
+        if (form.소비기한_일 === '' || isNaN(Number(form.소비기한_일)) || Number(form.소비기한_일) < 0) errs.소비기한_일 = '0 이상 숫자';
+        setErrors(errs);
+        if (Object.keys(errs).length) return;
+
+        const slug = form.id && form.id.trim()
+          ? form.id.trim()
+          : (String(form.영문명).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || newId('ing'));
+
+        onSave({
+          id: isEdit ? initial.id : slug,
+          이름: form.이름.trim(),
+          영문명: String(form.영문명).trim(),
+          수량: Number(form.수량),
+          단위: String(form.단위).trim() || '개',
+          카테고리: form.카테고리,
+          보관방법: form.보관방법,
+          보관위치: String(form.보관위치).trim(),
+          소비기한_일: Number(form.소비기한_일),
+          알레르기: textToArr(form.알레르기),
+          아이선호도: form.아이선호도 === '' ? null : Number(form.아이선호도),
+          주요영양소: textToArr(form.주요영양소),
+          대표요리: textToArr(form.대표요리),
+          비고: String(form.비고).trim(),
+        });
+      };
+
+      return (
+        <Modal
+          isOpen={isOpen}
+          onClose={onClose}
+          size="lg"
+          title={isEdit ? '✏️ 식재료 수정' : '➕ 식재료 추가'}
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="secondary" onClick={onClose}>취소</Button>
+              <Button onClick={submit} form="ing-form" type="submit">{isEdit ? '저장' : '추가하기'}</Button>
+            </div>
+          }
+        >
+          <form id="ing-form" onSubmit={submit} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Input ref={firstRef} label="이름 *" name="이름" value={form.이름} onChange={set('이름')} placeholder="예: 계란" error={errors.이름} />
+              <Input label="영문명" name="영문명" value={form.영문명} onChange={set('영문명')} placeholder="예: Egg" />
+            </div>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Input label="수량 *" name="수량" type="number" min="0" step="any" value={form.수량} onChange={set('수량')} error={errors.수량} />
+              <Input label="단위" name="단위" value={form.단위} onChange={set('단위')} placeholder="개 / g / 통…" />
+              <Select label="보관방법" value={form.보관방법} onChange={set('보관방법')}>
+                {STORAGE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                <option value="냉장(단기)·냉동(장기)">냉장·냉동(복합)</option>
+                <option value="실온·냉장">실온·냉장(복합)</option>
+              </Select>
+              <Input label="소비기한(남은 일수) *" name="소비기한_일" type="number" min="0" value={form.소비기한_일} onChange={set('소비기한_일')} error={errors.소비기한_일} />
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Select label="카테고리" value={form.카테고리} onChange={set('카테고리')}>
+                {CATEGORY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                {!CATEGORY_OPTIONS.includes(form.카테고리) && <option value={form.카테고리}>{form.카테고리}</option>}
+              </Select>
+              <Select label="아이 선호도 (1~5)" value={form.아이선호도} onChange={set('아이선호도')}>
+                <option value="">해당 없음 (조미료 등)</option>
+                {[1,2,3,4,5].map(n => <option key={n} value={n}>{'★'.repeat(n)} ({n}점)</option>)}
+              </Select>
+            </div>
+            <Input label="보관위치 / 팁" name="보관위치" value={form.보관위치} onChange={set('보관위치')} placeholder="예: 냉장실 안쪽 선반" />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Input label="알레르기 (콤마로 구분)" name="알레르기" value={form.알레르기} onChange={set('알레르기')} placeholder="예: 난류, 우유" />
+              <Input label="주요영양소 (콤마로 구분)" name="주요영양소" value={form.주요영양소} onChange={set('주요영양소')} placeholder="예: 단백질, 철분" />
+            </div>
+            <Input label="대표요리 (콤마로 구분)" name="대표요리" value={form.대표요리} onChange={set('대표요리')} placeholder="예: 계란말이, 계란찜" />
+            <Textarea label="비고 (보관·조리·유아식 팁)" name="비고" rows={2} value={form.비고} onChange={set('비고')} placeholder="예: 유아 단백질 공급의 핵심 재료" />
+            <p className="text-xs text-stone-400">⚠️ 알레르기와 아이 선호도는 가족 식단 안전을 위해 가능한 한 정확히 입력해 주세요.</p>
+          </form>
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 🗑️ 삭제 확인 모달 (공용)
+    // ========================================
+    function ConfirmDeleteModal({ isOpen, onClose, onConfirm, name, kind = '식재료' }) {
+      return (
+        <Modal
+          isOpen={isOpen}
+          onClose={onClose}
+          size="sm"
+          title="삭제 확인"
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="secondary" onClick={onClose}>취소</Button>
+              <Button variant="danger" onClick={onConfirm}>삭제</Button>
+            </div>
+          }
+        >
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-red-100 text-xl" aria-hidden="true">🗑️</div>
+            <p className="text-sm text-stone-600">
+              <span className="font-bold text-stone-800">{name}</span> {kind}을(를) 정말 삭제할까요?<br />
+              이 작업은 되돌릴 수 없습니다.
+            </p>
+          </div>
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 📄 페이지: 냉장고(식재료)
+    // ========================================
+    function FridgePage({ ingredients, onAdd, onUpdate, onDelete }) {
+      const [query, setQuery] = useState('');
+      const [catFilter, setCatFilter] = useState('전체');
+      const [storeFilter, setStoreFilter] = useState('전체');
+      const [sort, setSort] = useState('expiry');
+      const [formOpen, setFormOpen] = useState(false);
+      const [editing, setEditing] = useState(null);
+      const [deleting, setDeleting] = useState(null);
+
+      // 카테고리 대분류 매칭 (세부 카테고리에 키워드가 포함되면 묶음)
+      const catGroups = useMemo(() => {
+        const set = new Set();
+        ingredients.forEach(i => set.add(i.카테고리));
+        return ['전체', ...Array.from(set)];
+      }, [ingredients]);
+
+      const visible = useMemo(() => {
+        let list = ingredients.filter(i => {
+          const q = query.trim().toLowerCase();
+          const matchQ = !q || i.이름.toLowerCase().includes(q) || String(i.영문명).toLowerCase().includes(q);
+          const matchCat = catFilter === '전체' || i.카테고리 === catFilter;
+          const matchStore = storeFilter === '전체' || i.보관방법.includes(storeFilter);
+          return matchQ && matchCat && matchStore;
+        });
+        list = [...list].sort((a, b) => {
+          if (sort === 'expiry') return Number(a.소비기한_일) - Number(b.소비기한_일);
+          if (sort === 'name') return a.이름.localeCompare(b.이름, 'ko');
+          if (sort === 'pref') return (Number(b.아이선호도) || -1) - (Number(a.아이선호도) || -1);
+          return 0;
+        });
+        return list;
+      }, [ingredients, query, catFilter, storeFilter, sort]);
+
+      const openAdd = () => { setEditing(null); setFormOpen(true); };
+      const openEdit = (item) => { setEditing(item); setFormOpen(true); };
+
+      const handleSave = (data) => {
+        if (editing && editing.id) onUpdate(data);
+        else onAdd(data);
+        setFormOpen(false);
+      };
+
+      const confirmDelete = () => { if (deleting) onDelete(deleting.id); setDeleting(null); };
+
+      const hasAny = ingredients.length > 0;
+
+      return (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-extrabold text-stone-800">🧊 냉장고 식재료</h1>
+              <p className="text-sm text-stone-500">현재 보유한 식재료 {ingredients.length}종 · 소비기한 임박순으로 관리하세요.</p>
+            </div>
+            <Button onClick={openAdd}>➕ 식재료 추가</Button>
+          </div>
+
+          {hasAny && (
+            <Card className="p-3 sm:p-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+                <div className="md:col-span-5">
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" aria-hidden="true">🔍</span>
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="식재료 이름 검색…"
+                      aria-label="식재료 이름 검색"
+                      className="w-full rounded-xl border border-stone-200 bg-white py-2.5 pl-9 pr-3 text-sm transition focus:outline-none focus:ring-2 focus:ring-orange-300"
+                    />
+                  </div>
+                </div>
+                <div className="md:col-span-3">
+                  <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label="카테고리 필터" className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300">
+                    {catGroups.map(c => <option key={c} value={c}>{c === '전체' ? '전체 카테고리' : c}</option>)}
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <select value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)} aria-label="보관방법 필터" className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300">
+                    <option value="전체">전체 보관</option>
+                    {STORAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300">
+                    <option value="expiry">소비기한 임박순</option>
+                    <option value="name">이름순</option>
+                    <option value="pref">아이 선호순</option>
+                  </select>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {!hasAny ? (
+            <EmptyState emoji="🧊" title="냉장고가 비어 있어요" desc="첫 식재료를 추가해 보관·소비기한을 관리해 보세요." action={<Button onClick={openAdd}>➕ 식재료 추가</Button>} />
+          ) : visible.length === 0 ? (
+            <EmptyState emoji="🔍" title="검색 결과가 없어요" desc={`'${query.trim() || '선택한 필터'}' 조건에 맞는 식재료가 없습니다.`} action={<Button variant="secondary" onClick={() => { setQuery(''); setCatFilter('전체'); setStoreFilter('전체'); }}>필터 초기화</Button>} />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {visible.map(item => (
+                <IngredientCard key={item.id} item={item} onEdit={openEdit} onDelete={setDeleting} />
+              ))}
+            </div>
+          )}
+
+          <IngredientFormModal isOpen={formOpen} onClose={() => setFormOpen(false)} onSave={handleSave} initial={editing} />
+          <ConfirmDeleteModal isOpen={!!deleting} onClose={() => setDeleting(null)} onConfirm={confirmDelete} name={deleting && deleting.이름} kind="식재료" />
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🍳 레시피: 카드 / 상세 / 폼
+    // ========================================
+    function recipeMatch(recipe, haveIdSet) {
+      const need = Array.isArray(recipe.사용재료) ? recipe.사용재료 : [];
+      const missing = need.filter(id => !haveIdSet.has(id));
+      const have = need.filter(id => haveIdSet.has(id));
+      return { need, have, missing, ratio: need.length ? have.length / need.length : 0, canCook: missing.length === 0 && need.length > 0 };
+    }
+
+    function RecipeCard({ recipe, ingredientsById, haveIdSet, onOpen }) {
+      const m = recipeMatch(recipe, haveIdSet);
+      return (
+        <Card className="card-in flex h-full cursor-pointer flex-col p-4 transition hover:-translate-y-0.5 hover:shadow-md" onClick={() => onOpen(recipe)} role="button" tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(recipe); } }}>
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-base font-bold leading-snug text-stone-800">{recipe.제목}</h3>
+            {m.canCook
+              ? <Badge tone="emerald" className="shrink-0">✅ 지금 가능</Badge>
+              : m.need.length > 0 ? <Badge tone="amber" className="shrink-0">🛒 {m.missing.length}개 부족</Badge> : null}
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-stone-600">
+            <span className="inline-flex items-center gap-1"><span aria-hidden="true">⏱️</span>{recipe.소요시간}</span>
+            <span className="inline-flex items-center gap-1"><span aria-hidden="true">👨‍👩‍👧‍👦</span>{recipe.인분}</span>
+            <span className="inline-flex items-center gap-1"><span aria-hidden="true">🌶️</span>{recipe.맵기}</span>
+          </div>
+
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-xs font-bold text-stone-500">아이 적합도</span>
+            <Stars value={recipe.아이적합도} label="아이 적합도" />
+          </div>
+
+          <div className="mt-3">
+            <span className="mb-1 block text-xs font-bold text-stone-500">알레르기</span>
+            <AllergyChips items={recipe.알레르기} />
+          </div>
+
+          {m.need.length > 0 && (
+            <div className="mt-3 rounded-xl bg-stone-50 p-2.5">
+              <div className="mb-1 flex items-center justify-between text-xs">
+                <span className="font-bold text-stone-500">보유 재료</span>
+                <span className="font-semibold text-stone-600">{m.have.length} / {m.need.length}</span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
+                <div className={`h-full rounded-full ${m.canCook ? 'bg-emerald-500' : 'bg-amber-400'}`} style={{ width: `${Math.round(m.ratio * 100)}%` }} />
+              </div>
+              {m.missing.length > 0 && (
+                <p className="mt-1.5 text-xs text-amber-700">
+                  부족: {m.missing.map(id => (ingredientsById[id] && ingredientsById[id].이름) || id).join(', ')}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="mt-auto pt-3">
+            <span className="text-xs font-semibold text-orange-600">자세히 보기 →</span>
+          </div>
+        </Card>
+      );
+    }
+
+    function RecipeDetailModal({ recipe, isOpen, onClose, ingredientsById, haveIdSet, onEdit, onDelete }) {
+      if (!recipe) return null;
+      const m = recipeMatch(recipe, haveIdSet);
+      return (
+        <Modal
+          isOpen={isOpen}
+          onClose={onClose}
+          size="xl"
+          title={recipe.제목}
+          footer={
+            <div className="flex items-center justify-between gap-2">
+              <Button variant="ghost" className="text-red-600 hover:bg-red-50" onClick={() => onDelete(recipe)}>🗑️ 삭제</Button>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={onClose}>닫기</Button>
+                <Button onClick={() => onEdit(recipe)}>✏️ 수정</Button>
+              </div>
+            </div>
+          }
+        >
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-stone-600">
+              <span className="inline-flex items-center gap-1"><span aria-hidden="true">⏱️</span>{recipe.소요시간}</span>
+              <span className="inline-flex items-center gap-1"><span aria-hidden="true">👨‍👩‍👧‍👦</span>{recipe.인분}</span>
+              <span className="inline-flex items-center gap-1"><span aria-hidden="true">🌶️</span>{recipe.맵기}</span>
+              <span className="inline-flex items-center gap-1"><span className="font-bold text-stone-500">아이 적합도</span><Stars value={recipe.아이적합도} /></span>
+            </div>
+
+            <div className={`rounded-xl border p-3 ${m.canCook ? TONE.emerald.soft : (m.need.length ? TONE.amber.soft : TONE.slate.soft)}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className={`text-sm font-bold ${m.canCook ? TONE.emerald.text : (m.need.length ? TONE.amber.text : TONE.slate.text)}`}>
+                  {m.canCook ? '✅ 지금 가진 재료로 만들 수 있어요!' : (m.need.length ? `🛒 ${m.missing.length}개 재료가 부족해요` : '연결된 식재료 정보 없음')}
+                </span>
+                {m.need.length > 0 && <span className="text-xs font-semibold text-stone-500">{m.have.length}/{m.need.length} 보유</span>}
+              </div>
+              {m.missing.length > 0 && (
+                <p className="mt-1 text-sm">
+                  <span className="font-semibold text-amber-800">부족한 재료: </span>
+                  {m.missing.map(id => (ingredientsById[id] && ingredientsById[id].이름) || id).join(', ')}
+                </p>
+              )}
+            </div>
+
+            <section>
+              <h4 className="mb-1.5 flex items-center gap-1 text-sm font-bold text-stone-700">⚠️ 알레르기 정보</h4>
+              <AllergyChips items={recipe.알레르기} size="md" />
+            </section>
+
+            <section>
+              <h4 className="mb-2 flex items-center gap-1 text-sm font-bold text-stone-700">🧺 재료</h4>
+              <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {(recipe.재료 || []).map((r, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-sm text-stone-600">
+                    <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-orange-400" aria-hidden="true" />{r}
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section>
+              <h4 className="mb-2 flex items-center gap-1 text-sm font-bold text-stone-700">👩‍🍳 만드는 법</h4>
+              <ol className="space-y-2.5">
+                {(recipe.만드는법 || []).map((step, i) => (
+                  <li key={i} className="flex gap-2.5 text-sm leading-relaxed text-stone-700">
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-orange-100 text-xs font-bold text-orange-700">{i + 1}</span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+
+            {recipe.아이팁 && (
+              <section className="rounded-xl bg-amber-50 p-3 ring-1 ring-amber-100">
+                <h4 className="mb-1 flex items-center gap-1 text-sm font-bold text-amber-800">👶 아이를 위한 팁</h4>
+                <p className="text-sm leading-relaxed text-amber-900/80">{recipe.아이팁}</p>
+              </section>
+            )}
+
+            {recipe.영양포인트 && (
+              <section className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
+                <h4 className="mb-1 flex items-center gap-1 text-sm font-bold text-emerald-800">🥗 영양 포인트</h4>
+                <p className="text-sm leading-relaxed text-emerald-900/80">{recipe.영양포인트}</p>
+              </section>
+            )}
+
+            {recipe.사용재료 && recipe.사용재료.length > 0 && (
+              <section>
+                <h4 className="mb-2 text-sm font-bold text-stone-700">🔗 연결된 식재료</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {recipe.사용재료.map(id => {
+                    const have = haveIdSet.has(id);
+                    const name = (ingredientsById[id] && ingredientsById[id].이름) || id;
+                    return (
+                      <span key={id} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium ${have ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-500'}`}>
+                        {have ? '✅' : '○'} {name}
+                      </span>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
+        </Modal>
+      );
+    }
+
+    const EMPTY_RECIPE = {
+      id:'', 제목:'', 소요시간:'', 인분:'4인분 (어른 2 + 아이 2)', 맵기:'순함 (안 매움)', 아이적합도:'5',
+      알레르기:[], 재료:[], 만드는법:[], 아이팁:'', 영양포인트:'', 사용재료:[],
+    };
+
+    function RecipeFormModal({ isOpen, onClose, onSave, initial, ingredients }) {
+      const isEdit = !!(initial && initial.id);
+      const [form, setForm] = useState(EMPTY_RECIPE);
+      const [errors, setErrors] = useState({});
+      const firstRef = useRef(null);
+
+      useEffect(() => {
+        if (!isOpen) return;
+        if (initial) {
+          setForm({
+            ...EMPTY_RECIPE, ...initial,
+            아이적합도: String(initial.아이적합도 ?? '5'),
+            알레르기: arrToText(initial.알레르기),
+            재료: (initial.재료 || []).join('\n'),
+            만드는법: (initial.만드는법 || []).join('\n'),
+            사용재료: Array.isArray(initial.사용재료) ? initial.사용재료 : [],
+          });
+        } else {
+          setForm({ ...EMPTY_RECIPE });
+        }
+        setErrors({});
+        setTimeout(() => firstRef.current && firstRef.current.focus(), 50);
+      }, [isOpen, initial]);
+
+      const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+      const toggleUse = (id) => setForm(f => ({
+        ...f, 사용재료: f.사용재료.includes(id) ? f.사용재료.filter(x => x !== id) : [...f.사용재료, id]
+      }));
+
+      const submit = (e) => {
+        e.preventDefault();
+        const errs = {};
+        if (!String(form.제목).trim()) errs.제목 = '제목을 입력해 주세요.';
+        setErrors(errs);
+        if (Object.keys(errs).length) return;
+        onSave({
+          id: isEdit ? initial.id : newId('recipe'),
+          제목: form.제목.trim(),
+          소요시간: String(form.소요시간).trim() || '약 15분',
+          인분: String(form.인분).trim(),
+          맵기: String(form.맵기).trim(),
+          아이적합도: Number(form.아이적합도) || 3,
+          알레르기: textToArr(form.알레르기),
+          재료: String(form.재료).split('\n').map(s => s.trim()).filter(Boolean),
+          만드는법: String(form.만드는법).split('\n').map(s => s.trim()).filter(Boolean),
+          아이팁: String(form.아이팁).trim(),
+          영양포인트: String(form.영양포인트).trim(),
+          사용재료: form.사용재료,
+        });
+      };
+
+      return (
+        <Modal
+          isOpen={isOpen}
+          onClose={onClose}
+          size="xl"
+          title={isEdit ? '✏️ 레시피 수정' : '➕ 레시피 추가'}
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="secondary" onClick={onClose}>취소</Button>
+              <Button onClick={submit}>{isEdit ? '저장' : '추가하기'}</Button>
+            </div>
+          }
+        >
+          <form onSubmit={submit} className="space-y-4">
+            <Input ref={firstRef} label="제목 * (이모지 포함 가능)" name="제목" value={form.제목} onChange={set('제목')} placeholder="예: 🍗 닭다리살 데리야끼 덮밥" error={errors.제목} />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Input label="소요시간" name="소요시간" value={form.소요시간} onChange={set('소요시간')} placeholder="예: 약 25분" />
+              <Input label="인분" name="인분" value={form.인분} onChange={set('인분')} placeholder="예: 4인분" />
+              <Input label="맵기" name="맵기" value={form.맵기} onChange={set('맵기')} placeholder="예: 순함" />
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Select label="아이 적합도 (1~5★)" value={form.아이적합도} onChange={set('아이적합도')}>
+                {[1,2,3,4,5].map(n => <option key={n} value={n}>{'★'.repeat(n)} ({n}점)</option>)}
+              </Select>
+              <Input label="알레르기 (콤마로 구분)" name="알레르기" value={form.알레르기} onChange={set('알레르기')} placeholder="예: 닭고기, 대두, 난류" />
+            </div>
+            <Textarea label="재료 (한 줄에 하나씩)" name="재료" rows={4} value={form.재료} onChange={set('재료')} placeholder={"닭다리살 500g\n양파 1개\n간장 4큰술"} />
+            <Textarea label="만드는 법 (한 줄에 한 단계)" name="만드는법" rows={5} value={form.만드는법} onChange={set('만드는법')} placeholder={"닭을 한입 크기로 썬다.\n소스를 섞는다.\n팬에 굽는다."} />
+            <Textarea label="아이를 위한 팁" name="아이팁" rows={2} value={form.아이팁} onChange={set('아이팁')} placeholder="아이용은 잘게 잘라 소스를 적게…" />
+            <Textarea label="영양 포인트" name="영양포인트" rows={2} value={form.영양포인트} onChange={set('영양포인트')} placeholder="단백질 + 탄수화물 균형 한 끼…" />
+
+            <div>
+              <span className="mb-1.5 block text-sm font-semibold text-stone-700">사용 식재료 선택 (‘지금 만들 수 있는 레시피’ 매칭에 사용)</span>
+              <div className="nice-scroll max-h-44 overflow-y-auto rounded-xl border border-stone-200 p-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {ingredients.map(ing => {
+                    const on = form.사용재료.includes(ing.id);
+                    return (
+                      <button type="button" key={ing.id} onClick={() => toggleUse(ing.id)}
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition ${on ? 'bg-orange-500 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}>
+                        <span aria-hidden="true">{categoryEmoji(ing.카테고리, ing.이름)}</span>{ing.이름}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-stone-400">선택한 재료가 모두 냉장고에 있으면 ‘✅ 지금 가능’으로 표시됩니다.</p>
+            </div>
+          </form>
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 📄 페이지: 레시피
+    // ========================================
+    function RecipesPage({ recipes, ingredients, onAdd, onUpdate, onDelete }) {
+      const [detail, setDetail] = useState(null);
+      const [formOpen, setFormOpen] = useState(false);
+      const [editing, setEditing] = useState(null);
+      const [deleting, setDeleting] = useState(null);
+      const [onlyCookable, setOnlyCookable] = useState(false);
+
+      const ingredientsById = useMemo(() => {
+        const m = {}; ingredients.forEach(i => { m[i.id] = i; }); return m;
+      }, [ingredients]);
+      const haveIdSet = useMemo(() => new Set(ingredients.map(i => i.id)), [ingredients]);
+
+      const cookableCount = useMemo(
+        () => recipes.filter(r => recipeMatch(r, haveIdSet).canCook).length,
+        [recipes, haveIdSet]
+      );
+
+      const visible = useMemo(() => {
+        const list = onlyCookable ? recipes.filter(r => recipeMatch(r, haveIdSet).canCook) : recipes;
+        // 만들 수 있는 것 우선, 그다음 보유 비율 높은 순
+        return [...list].sort((a, b) => recipeMatch(b, haveIdSet).ratio - recipeMatch(a, haveIdSet).ratio);
+      }, [recipes, haveIdSet, onlyCookable]);
+
+      const openAdd = () => { setEditing(null); setFormOpen(true); };
+      const openEdit = (r) => { setDetail(null); setEditing(r); setFormOpen(true); };
+      const handleSave = (data) => {
+        if (editing && editing.id) onUpdate(data); else onAdd(data);
+        setFormOpen(false);
+      };
+      const confirmDelete = () => { if (deleting) { onDelete(deleting.id); } setDeleting(null); setDetail(null); };
+
+      return (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-extrabold text-stone-800">🍳 레시피</h1>
+              <p className="text-sm text-stone-500">총 {recipes.length}개 · 지금 만들 수 있는 레시피 <span className="font-bold text-emerald-600">{cookableCount}개</span></p>
+            </div>
+            <Button onClick={openAdd}>➕ 레시피 추가</Button>
+          </div>
+
+          <Card className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4">
+            <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-stone-700">
+              <input type="checkbox" checked={onlyCookable} onChange={(e) => setOnlyCookable(e.target.checked)} className="h-4 w-4 rounded border-stone-300 text-orange-500 focus:ring-orange-300" />
+              지금 만들 수 있는 레시피만 보기
+            </label>
+            <span className="text-xs text-stone-400">보유 식재료 {ingredients.length}종과 자동 매칭됩니다.</span>
+          </Card>
+
+          {recipes.length === 0 ? (
+            <EmptyState emoji="🍳" title="등록된 레시피가 없어요" desc="첫 레시피를 추가하고 냉장고 재료와 매칭해 보세요." action={<Button onClick={openAdd}>➕ 레시피 추가</Button>} />
+          ) : visible.length === 0 ? (
+            <EmptyState emoji="🛒" title="지금 만들 수 있는 레시피가 없어요" desc="필요한 재료를 더 채우거나 필터를 꺼 보세요." action={<Button variant="secondary" onClick={() => setOnlyCookable(false)}>전체 레시피 보기</Button>} />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {visible.map(r => (
+                <RecipeCard key={r.id} recipe={r} ingredientsById={ingredientsById} haveIdSet={haveIdSet} onOpen={setDetail} />
+              ))}
+            </div>
+          )}
+
+          <RecipeDetailModal recipe={detail} isOpen={!!detail} onClose={() => setDetail(null)} ingredientsById={ingredientsById} haveIdSet={haveIdSet} onEdit={openEdit} onDelete={setDeleting} />
+          <RecipeFormModal isOpen={formOpen} onClose={() => setFormOpen(false)} onSave={handleSave} initial={editing} ingredients={ingredients} />
+          <ConfirmDeleteModal isOpen={!!deleting} onClose={() => setDeleting(null)} onConfirm={confirmDelete} name={deleting && deleting.제목} kind="레시피" />
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 페이지: 대시보드(홈)
+    // ========================================
+    function StatCard({ emoji, label, value, sub, tone = 'orange' }) {
+      const tones = {
+        orange:'from-orange-400 to-amber-400',
+        red:'from-red-400 to-rose-400',
+        emerald:'from-emerald-400 to-teal-400',
+      };
+      return (
+        <Card className="overflow-hidden p-4">
+          <div className="flex items-center gap-3">
+            <div className={`grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br ${tones[tone]} text-2xl text-white shadow-sm`} aria-hidden="true">{emoji}</div>
+            <div>
+              <p className="text-sm font-medium text-stone-500">{label}</p>
+              <p className="text-2xl font-extrabold leading-tight text-stone-800">{value}</p>
+              {sub && <p className="text-xs text-stone-400">{sub}</p>}
+            </div>
+          </div>
+        </Card>
+      );
+    }
+
+    function DistributionBar({ title, data }) {
+      const total = data.reduce((s, d) => s + d.count, 0) || 1;
+      const palette = ['bg-orange-400','bg-amber-400','bg-emerald-400','bg-sky-400','bg-violet-400','bg-rose-400','bg-teal-400','bg-lime-400','bg-fuchsia-400'];
+      return (
+        <Card className="p-4">
+          <h3 className="mb-3 text-sm font-bold text-stone-700">{title}</h3>
+          <div className="flex h-3 w-full overflow-hidden rounded-full bg-stone-100">
+            {data.map((d, i) => (
+              <div key={d.label} className={palette[i % palette.length]} style={{ width: `${(d.count / total) * 100}%` }} title={`${d.label} ${d.count}`} />
+            ))}
+          </div>
+          <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
+            {data.map((d, i) => (
+              <li key={d.label} className="flex items-center gap-1.5 text-xs text-stone-600">
+                <span className={`h-2.5 w-2.5 rounded-sm ${palette[i % palette.length]}`} aria-hidden="true" />
+                <span className="truncate">{d.label}</span>
+                <span className="ml-auto font-semibold text-stone-500">{d.count}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      );
+    }
+
+    function DashboardPage({ ingredients, recipes }) {
+      const { navigate } = useRouter();
+
+      const soonList = useMemo(
+        () => ingredients.filter(i => expiryLevel(i.소비기한_일).key === 'soon')
+                         .sort((a, b) => a.소비기한_일 - b.소비기한_일),
+        [ingredients]
+      );
+      const warnList = useMemo(
+        () => ingredients.filter(i => expiryLevel(i.소비기한_일).key === 'warn')
+                         .sort((a, b) => a.소비기한_일 - b.소비기한_일),
+        [ingredients]
+      );
+      const alertList = [...soonList, ...warnList];
+
+      const haveIdSet = useMemo(() => new Set(ingredients.map(i => i.id)), [ingredients]);
+      const cookableCount = useMemo(() => recipes.filter(r => recipeMatch(r, haveIdSet).canCook).length, [recipes, haveIdSet]);
+
+      const catDist = useMemo(() => {
+        const m = {};
+        ingredients.forEach(i => { const c = (i.카테고리 || '기타').split(/[·(]/)[0]; m[c] = (m[c] || 0) + 1; });
+        return Object.entries(m).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+      }, [ingredients]);
+
+      const storeDist = useMemo(() => {
+        const m = { 냉장:0, 냉동:0, 실온:0 };
+        ingredients.forEach(i => {
+          const s = i.보관방법 || '';
+          if (s.includes('냉장')) m.냉장 += 1;
+          if (s.includes('냉동')) m.냉동 += 1;
+          if (s.includes('실온')) m.실온 += 1;
+        });
+        return Object.entries(m).filter(([, c]) => c > 0).map(([label, count]) => ({ label, count }));
+      }, [ingredients]);
+
+      // 아이 선호 TOP (선호도 4 이상)
+      const kidFavs = useMemo(
+        () => ingredients.filter(i => Number(i.아이선호도) >= 4).sort((a, b) => b.아이선호도 - a.아이선호도).slice(0, 6),
+        [ingredients]
+      );
+      // 알레르기 주의 품목
+      const allergyItems = useMemo(
+        () => ingredients.filter(i => Array.isArray(i.알레르기) && i.알레르기.length > 0),
+        [ingredients]
+      );
+      const allergySet = useMemo(() => {
+        const s = new Set();
+        allergyItems.forEach(i => i.알레르기.forEach(a => s.add(a)));
+        return Array.from(s);
+      }, [allergyItems]);
+
+      return (
+        <div className="space-y-6">
+          <div>
+            <h1 className="text-xl font-extrabold text-stone-800">🏠 대시보드</h1>
+            <p className="text-sm text-stone-500">우리집 냉장고 한눈에 보기 — 3~7세 아이 2명 포함 4인 가족 기준</p>
+          </div>
+
+          {/* 요약 카드 */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <button onClick={() => navigate('/fridge')} className="text-left">
+              <StatCard emoji="🧊" label="총 식재료" value={`${ingredients.length}종`} sub="냉장고 보기 →" tone="orange" />
+            </button>
+            <button onClick={() => navigate('/fridge')} className="text-left">
+              <StatCard emoji="⏰" label="소비기한 임박 (3일 이내)" value={`${soonList.length}건`} sub={warnList.length ? `주의 ${warnList.length}건 추가` : '여유 있어요'} tone="red" />
+            </button>
+            <button onClick={() => navigate('/recipes')} className="text-left">
+              <StatCard emoji="🍳" label="레시피" value={`${recipes.length}개`} sub={`지금 가능 ${cookableCount}개 →`} tone="emerald" />
+            </button>
+          </div>
+
+          {/* 임박 알림 */}
+          <Card className="p-4 sm:p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-base font-bold text-stone-800">⏰ 소비기한 알림</h2>
+              <Button variant="ghost" size="sm" onClick={() => navigate('/fridge')}>냉장고로 →</Button>
+            </div>
+            {alertList.length === 0 ? (
+              <div className="flex items-center gap-3 rounded-xl bg-emerald-50 p-4 ring-1 ring-emerald-100">
+                <span className="text-2xl" aria-hidden="true">😊</span>
+                <p className="text-sm font-medium text-emerald-700">임박하거나 주의가 필요한 식재료가 없어요. 모두 여유 있습니다!</p>
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {alertList.map(i => {
+                  const lvl = expiryLevel(i.소비기한_일);
+                  const t = TONE[lvl.tone];
+                  return (
+                    <li key={i.id} className={`flex items-center gap-3 rounded-xl border p-3 ${t.soft}`}>
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-lg ring-1 ring-stone-100" aria-hidden="true">{categoryEmoji(i.카테고리, i.이름)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-stone-800">{i.이름} <span className="font-normal text-stone-500">· {i.수량}{i.단위}</span></p>
+                        <p className="truncate text-xs text-stone-500">{i.보관위치}</p>
+                      </div>
+                      {Array.isArray(i.알레르기) && i.알레르기.length > 0 && (
+                        <span className="hidden shrink-0 sm:inline-flex"><AllergyChips items={i.알레르기} /></span>
+                      )}
+                      <Badge tone={lvl.tone} className="shrink-0">
+                        <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} aria-hidden="true" />{lvl.label} · {i.소비기한_일}일
+                      </Badge>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+
+          {/* 아이 선호 & 알레르기 (1급 시민) */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card className="p-4 sm:p-5">
+              <h2 className="mb-3 flex items-center gap-2 text-base font-bold text-stone-800">👶 우리 아이 선호 식재료</h2>
+              {kidFavs.length === 0 ? (
+                <p className="text-sm text-stone-400">선호도 4점 이상 식재료가 없어요.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {kidFavs.map(i => (
+                    <li key={i.id} className="flex items-center gap-2.5">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-50 text-base ring-1 ring-amber-100" aria-hidden="true">{categoryEmoji(i.카테고리, i.이름)}</span>
+                      <span className="flex-1 truncate text-sm font-medium text-stone-700">{i.이름}</span>
+                      <Stars value={i.아이선호도} label="아이 선호도" />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+
+            <Card className="p-4 sm:p-5">
+              <h2 className="mb-1 flex items-center gap-2 text-base font-bold text-stone-800">⚠️ 알레르기 주의</h2>
+              <p className="mb-3 text-xs text-stone-500">아이 식단 안전을 위해 항상 확인하세요.</p>
+              {allergySet.length === 0 ? (
+                <p className="text-sm text-emerald-600">현재 알레르기 유발 식재료가 없습니다 ✅</p>
+              ) : (
+                <>
+                  <div className="mb-3 flex flex-wrap gap-1.5">
+                    {allergySet.map(a => (
+                      <span key={a} className="inline-flex items-center gap-0.5 rounded-md bg-red-100 px-2.5 py-1 text-sm font-semibold text-red-700 ring-1 ring-inset ring-red-200">
+                        <span aria-hidden="true">⚠️</span>{a}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-stone-500">
+                    해당 식재료 {allergyItems.length}종: {allergyItems.map(i => i.이름).join(', ')}
+                  </p>
+                </>
+              )}
+            </Card>
+          </div>
+
+          {/* 분포 */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <DistributionBar title="📦 카테고리별 분포" data={catDist} />
+            <DistributionBar title="🌡️ 보관방법별 분포" data={storeDist} />
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🔔 토스트 (비차단 에러/안내 배너)
+    // ========================================
+    function Toast({ toast, onClose }) {
+      useEffect(() => {
+        if (!toast) return;
+        const ms = toast.tone === 'error' ? 4500 : 2500;
+        const t = setTimeout(onClose, ms);
+        return () => clearTimeout(t);
+      }, [toast, onClose]);
+      if (!toast) return null;
+      const tones = {
+        error: 'bg-red-600 text-white',
+        success: 'bg-emerald-600 text-white',
+        info: 'bg-stone-800 text-white',
+      };
+      return (
+        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-[60] flex justify-center px-4">
+          <div className={`pointer-events-auto flex max-w-md items-start gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg ${tones[toast.tone] || tones.info} fade-in`} role="status">
+            <span aria-hidden="true">{toast.tone === 'error' ? '⚠️' : (toast.tone === 'success' ? '✅' : 'ℹ️')}</span>
+            <span className="flex-1">{toast.message}</span>
+            <button onClick={onClose} aria-label="닫기" className="shrink-0 opacity-80 hover:opacity-100">✕</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App (상태 소유 + 라우팅 + REST API 영속화)
+    //   - 마운트 시 식재료/레시피를 동시에 GET.
+    //   - 모든 CRUD 는 낙관적 업데이트 + 실패 시 롤백(서버 한국어 메시지를 토스트로 표시).
+    // ========================================
+    function App() {
+      const { path, navigate } = useHashPath();
+
+      const [ingredients, setIngredients] = useState([]);
+      const [recipes, setRecipes] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [toast, setToast] = useState(null);
+
+      const showToast = useCallback((message, tone = 'error') => setToast({ message, tone, at: Date.now() }), []);
+
+      // --- 초기 로드: 두 리소스를 동시에 GET ---
+      const loadAll = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const [ings, recs] = await Promise.all([apiList('ingredients'), apiList('recipes')]);
+          setIngredients(Array.isArray(ings) ? ings : []);
+          setRecipes(Array.isArray(recs) ? recs : []);
+        } catch (e) {
+          setError(e.message || '데이터를 불러오지 못했습니다.');
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => { loadAll(); }, [loadAll]);
+
+      // --- 식재료 CRUD (낙관적 업데이트 + 롤백) ---
+      const addIngredient = useCallback(async (data) => {
+        const prev = ingredients;
+        // 낙관적: 즉시 목록에 추가 (서버 응답으로 정규화된 행으로 교체).
+        setIngredients(cur => [data, ...cur.filter(p => p.id !== data.id)]);
+        try {
+          const saved = await apiCreate('ingredients', data);
+          setIngredients(cur => {
+            const without = cur.filter(p => p.id !== data.id && p.id !== saved.id);
+            return [saved, ...without];
+          });
+          showToast(`'${saved.이름}' 식재료를 추가했어요.`, 'success');
+        } catch (e) {
+          setIngredients(prev); // 롤백
+          showToast(e.message, 'error');
+        }
+      }, [ingredients, showToast]);
+
+      const updateIngredient = useCallback(async (data) => {
+        const prev = ingredients;
+        setIngredients(cur => cur.map(p => (p.id === data.id ? { ...p, ...data } : p)));
+        try {
+          const saved = await apiUpdate('ingredients', data.id, data);
+          setIngredients(cur => cur.map(p => (p.id === saved.id ? saved : p)));
+        } catch (e) {
+          setIngredients(prev);
+          showToast(e.message, 'error');
+        }
+      }, [ingredients, showToast]);
+
+      const deleteIngredient = useCallback(async (id) => {
+        const prev = ingredients;
+        setIngredients(cur => cur.filter(p => p.id !== id));
+        try {
+          await apiDelete('ingredients', id);
+        } catch (e) {
+          setIngredients(prev);
+          showToast(e.message, 'error');
+        }
+      }, [ingredients, showToast]);
+
+      // --- 레시피 CRUD (낙관적 업데이트 + 롤백) ---
+      const addRecipe = useCallback(async (data) => {
+        const prev = recipes;
+        setRecipes(cur => [data, ...cur.filter(p => p.id !== data.id)]);
+        try {
+          const saved = await apiCreate('recipes', data);
+          setRecipes(cur => {
+            const without = cur.filter(p => p.id !== data.id && p.id !== saved.id);
+            return [saved, ...without];
+          });
+          showToast(`'${saved.제목}' 레시피를 추가했어요.`, 'success');
+        } catch (e) {
+          setRecipes(prev);
+          showToast(e.message, 'error');
+        }
+      }, [recipes, showToast]);
+
+      const updateRecipe = useCallback(async (data) => {
+        const prev = recipes;
+        setRecipes(cur => cur.map(p => (p.id === data.id ? { ...p, ...data } : p)));
+        try {
+          const saved = await apiUpdate('recipes', data.id, data);
+          setRecipes(cur => cur.map(p => (p.id === saved.id ? saved : p)));
+        } catch (e) {
+          setRecipes(prev);
+          showToast(e.message, 'error');
+        }
+      }, [recipes, showToast]);
+
+      const deleteRecipe = useCallback(async (id) => {
+        const prev = recipes;
+        setRecipes(cur => cur.filter(p => p.id !== id));
+        try {
+          await apiDelete('recipes', id);
+        } catch (e) {
+          setRecipes(prev);
+          showToast(e.message, 'error');
+        }
+      }, [recipes, showToast]);
+
+      let page;
+      if (loading) {
+        page = (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <span className="mb-3 inline-block h-9 w-9 animate-spin rounded-full border-4 border-orange-200 border-t-orange-500" aria-hidden="true" />
+            <p className="text-sm font-medium text-stone-500">불러오는 중…</p>
+          </div>
+        );
+      } else if (error) {
+        page = (
+          <div className="mx-auto max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+            <div className="mb-2 text-3xl" aria-hidden="true">⚠️</div>
+            <h2 className="text-base font-bold text-red-700">데이터를 불러오지 못했어요</h2>
+            <p className="mt-1 text-sm text-red-600">{error}</p>
+            <div className="mt-4">
+              <Button variant="danger" onClick={loadAll}>🔄 다시 시도</Button>
+            </div>
+          </div>
+        );
+      } else if (path.startsWith('/fridge')) {
+        page = <FridgePage ingredients={ingredients} onAdd={addIngredient} onUpdate={updateIngredient} onDelete={deleteIngredient} />;
+      } else if (path.startsWith('/recipes')) {
+        page = <RecipesPage recipes={recipes} ingredients={ingredients} onAdd={addRecipe} onUpdate={updateRecipe} onDelete={deleteRecipe} />;
+      } else {
+        page = <DashboardPage ingredients={ingredients} recipes={recipes} />;
+      }
+
+      return (
+        <RouterContext.Provider value={{ path, navigate }}>
+          <div className="min-h-screen">
+            <Header />
+            <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8" key={loading || error ? 'status' : path}>
+              <div className="fade-in">{page}</div>
+            </main>
+            <footer className="border-t border-stone-200/70 py-6 text-center text-xs text-stone-400">
+              우리집 냉장고 · 식재료 &amp; 레시피 관리 · 데이터는 PostgreSQL(Supabase) 데이터베이스에 안전하게 저장됩니다
+            </footer>
+          </div>
+          <Toast toast={toast} onClose={() => setToast(null)} />
+        </RouterContext.Provider>
+      );
+    }
+
+    // ========================================
+    // 렌더링
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

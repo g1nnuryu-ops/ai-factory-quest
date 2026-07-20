@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>익명 연봉·지출 비교</title>
+
+  <!-- React 18 (CDN, production) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel standalone — 반드시 7.x 로 고정 (Babel 8 은 인라인 JSX 를 깨뜨림) -->
+  <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'system-ui', 'sans-serif'] },
+          colors: { apple: { blue: '#0071e3', blueDark: '#0058b8' } },
+        },
+      },
+    };
+  </script>
+  <style>
+    html, body, #root { min-height: 100%; }
+    body { background: #f5f5f7; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fadeUp { animation: fadeUp .45s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pop { 0% { transform: scale(.94); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    .animate-pop { animation: pop .3s cubic-bezier(.22,1,.36,1) both; }
+    /* 막대가 0 → 목표치로 차오르는 트랜지션 */
+    .bar-grow { transition: width .8s cubic-bezier(.22,1,.36,1); }
+    @media (prefers-reduced-motion: reduce) {
+      .animate-fadeUp, .animate-pop { animation: none; }
+      .bar-grow { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    // ============================================================
+    // 상수 / 매핑
+    // ============================================================
+    const STORAGE_KEY = 'salary-compare-v1';
+
+    const JOB_OPTIONS = ['개발', '디자인', '기획/PM', '마케팅', '영업', '경영/지원', '금융', '의료', '교육', '제조/생산', '기타'];
+
+    // 지출 카테고리 key → 한글 라벨 (서버 계약과 동일한 매핑)
+    const EXPENSE_FIELDS = [
+      { key: 'food',      label: '식비' },
+      { key: 'housing',   label: '주거비' },
+      { key: 'transport', label: '교통비' },
+      { key: 'education',  label: '교육비' },
+      { key: 'etc',       label: '기타' },
+    ];
+    const EMPTY_EXPENSES = { food: '', housing: '', transport: '', education: '', etc: '' };
+
+    // ============================================================
+    // API 헬퍼 (형제 앱과 동일한 패턴: success 확인 → data 반환)
+    // ============================================================
+    async function api(path, options) {
+      const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error((json && json.message) || '요청을 처리하지 못했습니다.');
+      return json.data;
+    }
+
+    // ============================================================
+    // 포맷 / 계산 헬퍼
+    // ============================================================
+    const fmt = (n) => Math.round(Number(n) || 0).toLocaleString('ko-KR');       // 콤마
+    const won = (man) => fmt(man) + '만원';                                      // "372만원"
+    const yearOf = (man) => fmt((Number(man) || 0) * 12);                        // 연 환산(만원)
+    const salaryLine = (man) => `${won(man)} · 연 ${yearOf(man)}만원`;            // "372만원 · 연 4,464만원"
+
+    const loadSaved = () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        return obj && typeof obj === 'object' ? obj : null;
+      } catch { return null; }
+    };
+    const saveResult = (payload) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch {} };
+    const clearSaved = () => { try { localStorage.removeItem(STORAGE_KEY); } catch {} };
+
+    // 폼 입력값 → 서버 body (만원 정수)
+    function buildEntryBody(input) {
+      const exp = {};
+      for (const f of EXPENSE_FIELDS) exp[f.key] = Math.max(0, Math.round(Number(input.expenses[f.key]) || 0));
+      return {
+        jobCategory: input.jobCategory,
+        years: Math.max(0, Math.round(Number(input.years) || 0)),
+        monthlySalary: Math.max(0, Math.round(Number(input.monthlySalary) || 0)),
+        expenses: exp,
+      };
+    }
+
+    // ============================================================
+    // 🎨 디자인 시스템 — Field / NumberInput / Bar
+    // ============================================================
+    function Field({ label, hint, htmlFor, children }) {
+      return (
+        <div>
+          <div className="flex items-baseline justify-between mb-1.5">
+            <label htmlFor={htmlFor} className="block text-sm font-semibold text-gray-700">{label}</label>
+            {hint && <span className="text-xs text-gray-400">{hint}</span>}
+          </div>
+          {children}
+        </div>
+      );
+    }
+
+    // 만원 단위 정수 입력 — 우측에 "만원" 라벨 고정
+    function ManwonInput({ id, value, onChange, placeholder, ariaInvalid }) {
+      return (
+        <div className="relative">
+          <input
+            id={id}
+            type="number"
+            inputMode="numeric"
+            min="0"
+            step="1"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder}
+            aria-invalid={ariaInvalid ? 'true' : undefined}
+            className={[
+              'w-full rounded-2xl border bg-gray-50 px-4 py-3 pr-14 text-base text-gray-900 outline-none transition',
+              'focus:bg-white focus:ring-2',
+              ariaInvalid
+                ? 'border-rose-300 focus:border-rose-400 focus:ring-rose-400/20'
+                : 'border-gray-200 focus:border-apple-blue focus:ring-apple-blue/20',
+            ].join(' ')}
+          />
+          <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-400">만원</span>
+        </div>
+      );
+    }
+
+    // 공용 가로 막대 (라벨 + 값 + 트랙). animate 로 width 0→pct.
+    function Bar({ pct, color, animate }) {
+      return (
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/[.06]">
+          <div
+            className={'bar-grow h-full rounded-full ' + color}
+            style={{ width: (animate ? Math.max(0, Math.min(100, pct)) : 0) + '%' }}
+          />
+        </div>
+      );
+    }
+
+    // ============================================================
+    // 📄 입력 폼 (익명)
+    // ============================================================
+    function EntryForm({ onSubmit, submitting, serverError }) {
+      const [jobCategory, setJobCategory] = useState('');
+      const [years, setYears] = useState('');
+      const [monthlySalary, setMonthlySalary] = useState('');
+      const [expenses, setExpenses] = useState(EMPTY_EXPENSES);
+      const [touched, setTouched] = useState(false);
+
+      const setExpense = (key, v) => setExpenses((p) => ({ ...p, [key]: v }));
+
+      // 검증
+      const errors = useMemo(() => {
+        const e = {};
+        if (!jobCategory) e.jobCategory = '직군을 선택해 주세요.';
+        const sal = Number(monthlySalary);
+        if (monthlySalary === '' || isNaN(sal)) e.monthlySalary = '월급을 입력해 주세요.';
+        else if (sal <= 0) e.monthlySalary = '월급은 0보다 커야 해요.';
+        const yr = Number(years);
+        if (years !== '' && (isNaN(yr) || yr < 0 || yr > 50)) e.years = '연차는 0~50 사이로 입력해 주세요.';
+        for (const f of EXPENSE_FIELDS) {
+          const v = expenses[f.key];
+          if (v !== '' && (isNaN(Number(v)) || Number(v) < 0)) e[f.key] = '0 이상';
+        }
+        return e;
+      }, [jobCategory, monthlySalary, years, expenses]);
+
+      const isValid = Object.keys(errors).length === 0;
+      const show = (k) => touched && errors[k];
+
+      const handleSubmit = (ev) => {
+        ev.preventDefault();
+        setTouched(true);
+        if (!isValid || submitting) return;
+        onSubmit({ jobCategory, years, monthlySalary, expenses });
+      };
+
+      const totalExpense = EXPENSE_FIELDS.reduce((s, f) => s + (Number(expenses[f.key]) || 0), 0);
+
+      return (
+        <form onSubmit={handleSubmit} className="animate-fadeUp space-y-5" noValidate>
+          {/* 익명 안내 배너 */}
+          <div className="flex items-start gap-3 rounded-2xl bg-white p-4 shadow-sm">
+            <span className="text-xl leading-none select-none">🕶️</span>
+            <p className="text-sm leading-relaxed text-gray-600">
+              <span className="font-semibold text-gray-800">완전 익명</span>으로 저장돼요. 이름·이메일 등 개인정보는 받지 않으며,
+              입력한 숫자만 전체 통계에 합산됩니다.
+            </p>
+          </div>
+
+          {/* 기본 정보 카드 */}
+          <div className="space-y-4 rounded-[24px] bg-white p-5 shadow-sm">
+            <Field label="직군" htmlFor="job">
+              <div className="relative">
+                <select
+                  id="job"
+                  value={jobCategory}
+                  onChange={(e) => setJobCategory(e.target.value)}
+                  aria-invalid={show('jobCategory') ? 'true' : undefined}
+                  className={[
+                    'w-full appearance-none rounded-2xl border bg-gray-50 px-4 py-3 pr-10 text-base outline-none transition focus:bg-white focus:ring-2',
+                    jobCategory ? 'text-gray-900' : 'text-gray-400',
+                    show('jobCategory')
+                      ? 'border-rose-300 focus:border-rose-400 focus:ring-rose-400/20'
+                      : 'border-gray-200 focus:border-apple-blue focus:ring-apple-blue/20',
+                  ].join(' ')}
+                >
+                  <option value="" disabled>직군을 선택하세요</option>
+                  {JOB_OPTIONS.map((j) => <option key={j} value={j} className="text-gray-900">{j}</option>)}
+                </select>
+                <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">▾</span>
+              </div>
+              {show('jobCategory') && <p className="mt-1.5 text-xs text-rose-500">{errors.jobCategory}</p>}
+            </Field>
+
+            <Field label="연차" hint="0 ~ 50년" htmlFor="years">
+              <div className="relative">
+                <input
+                  id="years"
+                  type="number"
+                  inputMode="numeric"
+                  min="0"
+                  max="50"
+                  step="1"
+                  value={years}
+                  onChange={(e) => setYears(e.target.value)}
+                  placeholder="예) 5"
+                  aria-invalid={show('years') ? 'true' : undefined}
+                  className={[
+                    'w-full rounded-2xl border bg-gray-50 px-4 py-3 pr-12 text-base text-gray-900 outline-none transition focus:bg-white focus:ring-2',
+                    show('years')
+                      ? 'border-rose-300 focus:border-rose-400 focus:ring-rose-400/20'
+                      : 'border-gray-200 focus:border-apple-blue focus:ring-apple-blue/20',
+                  ].join(' ')}
+                />
+                <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-400">년</span>
+              </div>
+              {show('years') && <p className="mt-1.5 text-xs text-rose-500">{errors.years}</p>}
+            </Field>
+
+            <Field label="월급" hint="세전·만원 단위" htmlFor="salary">
+              <ManwonInput id="salary" value={monthlySalary} onChange={setMonthlySalary} placeholder="예) 400" ariaInvalid={show('monthlySalary')} />
+              {monthlySalary !== '' && Number(monthlySalary) > 0 ? (
+                <p className="mt-1.5 text-xs text-gray-400">연 환산 약 <span className="font-semibold text-gray-500">{yearOf(monthlySalary)}만원</span></p>
+              ) : null}
+              {show('monthlySalary') && <p className="mt-1.5 text-xs text-rose-500">{errors.monthlySalary}</p>}
+            </Field>
+          </div>
+
+          {/* 월 지출 카드 */}
+          <div className="rounded-[24px] bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h3 className="text-sm font-semibold text-gray-700">월 지출 <span className="font-normal text-gray-400">(선택, 만원)</span></h3>
+              {totalExpense > 0 && <span className="text-xs font-medium text-gray-500">합계 {won(totalExpense)}</span>}
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {EXPENSE_FIELDS.map((f) => (
+                <div key={f.key}>
+                  <label htmlFor={'exp-' + f.key} className="mb-1 block text-xs font-medium text-gray-500">{f.label}</label>
+                  <ManwonInput id={'exp-' + f.key} value={expenses[f.key]} onChange={(v) => setExpense(f.key, v)} placeholder="0" ariaInvalid={show(f.key)} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {serverError && (
+            <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600">{serverError}</div>
+          )}
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className={[
+              'w-full rounded-full px-6 py-4 text-base font-semibold text-white transition active:scale-[.98]',
+              submitting ? 'bg-gray-300 cursor-not-allowed' : 'bg-apple-blue hover:bg-apple-blueDark shadow-lg shadow-apple-blue/25',
+            ].join(' ')}
+          >
+            {submitting ? '제출하는 중…' : '익명으로 제출하고 비교하기'}
+          </button>
+          <p className="text-center text-xs text-gray-400">제출 즉시 전체 평균과 내 위치를 보여드려요.</p>
+        </form>
+      );
+    }
+
+    // ============================================================
+    // 📊 결과 — 통계 섹션 컴포넌트들
+    // ============================================================
+    function SectionCard({ title, sub, children }) {
+      return (
+        <section className="animate-fadeUp rounded-[24px] bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-4">
+            <h3 className="text-base font-bold tracking-tight text-gray-900">{title}</h3>
+            {sub && <p className="mt-0.5 text-sm text-gray-500">{sub}</p>}
+          </div>
+          {children}
+        </section>
+      );
+    }
+
+    // 상위 % 강조 + 게이지
+    function RankHero({ my, count, animate }) {
+      if (!my) return null;
+      const top = Number(my.rankTop);
+      const topLabel = top <= 0 ? '상위 1% 이내' : `상위 ${fmt(top)}%`;
+      // 게이지: 상위로 갈수록(작은 %) 길게 채워 "성취감" 표현. 상위 0% → 100%.
+      const gauge = Math.max(4, Math.min(100, 100 - top));
+      const beats = my.beatsPercent != null ? Number(my.beatsPercent) : null;
+
+      return (
+        <section className="animate-fadeUp overflow-hidden rounded-[24px] bg-gradient-to-br from-apple-blue to-apple-blueDark p-6 text-white shadow-lg shadow-apple-blue/25 sm:p-7">
+          <p className="text-sm font-medium text-white/75">내 월급 위치</p>
+          <p className="mt-1 text-4xl font-bold tracking-tight sm:text-5xl">{topLabel}</p>
+          <div className="mt-5 h-3 w-full overflow-hidden rounded-full bg-white/20">
+            <div className="bar-grow h-full rounded-full bg-white" style={{ width: (animate ? gauge : 0) + '%' }} />
+          </div>
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <span className="text-white/80">내 월급 <span className="font-semibold text-white">{won(my.salary)}</span></span>
+            {beats != null && <span className="text-white/80">하위 <span className="font-semibold text-white">{fmt(beats)}%</span>보다 많이 법니다</span>}
+          </div>
+        </section>
+      );
+    }
+
+    // 전체 요약 (평균 월급 + 연봉환산 + 표본 N + 중앙값/최소/최대)
+    function SummaryCard({ salary, count }) {
+      const s = salary || {};
+      const stats = [
+        { label: '중앙값', value: won(s.median) },
+        { label: '최저', value: won(s.min) },
+        { label: '최고', value: won(s.max) },
+      ];
+      return (
+        <SectionCard title="전체 평균 월급" sub={`응답자 ${fmt(count)}명 기준`}>
+          <p className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">{won(s.avgMonthly)}</p>
+          <p className="mt-1 text-sm font-medium text-gray-500">연 환산 {yearOf(s.avgMonthly)}만원</p>
+          <div className="mt-5 grid grid-cols-3 gap-2">
+            {stats.map((it) => (
+              <div key={it.label} className="rounded-2xl bg-gray-50 px-3 py-3 text-center">
+                <p className="text-xs text-gray-400">{it.label}</p>
+                <p className="mt-0.5 text-sm font-semibold text-gray-800">{it.value}</p>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      );
+    }
+
+    // 월급 분포 막대 (내 버킷 하이라이트)
+    function DistributionCard({ distribution, myBucket, animate }) {
+      const list = Array.isArray(distribution) ? distribution : [];
+      const max = Math.max(1, ...list.map((d) => Number(d.count) || 0));
+      return (
+        <SectionCard title="월급 분포" sub="내가 속한 구간이 파란색이에요">
+          {list.length === 0 ? (
+            <p className="text-sm text-gray-400">분포 데이터가 아직 없어요.</p>
+          ) : (
+            <div className="space-y-2.5">
+              {list.map((d, i) => {
+                const c = Number(d.count) || 0;
+                const pct = (c / max) * 100;
+                const mine = i === myBucket;
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className={'w-20 shrink-0 text-right text-xs tabular-nums ' + (mine ? 'font-bold text-apple-blue' : 'text-gray-500')}>{d.label}</span>
+                    <div className="flex-1">
+                      <Bar pct={pct} color={mine ? 'bg-apple-blue' : 'bg-gray-200'} animate={animate} />
+                    </div>
+                    <span className={'w-10 shrink-0 text-right text-xs tabular-nums ' + (mine ? 'font-bold text-apple-blue' : 'text-gray-400')}>{fmt(c)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {typeof myBucket === 'number' && myBucket >= 0 && list[myBucket] && (
+            <p className="mt-4 rounded-2xl bg-apple-blue/[.06] px-4 py-2.5 text-sm text-gray-600">
+              내 월급은 <span className="font-semibold text-apple-blue">{list[myBucket].label}만원</span> 구간이에요.
+            </p>
+          )}
+        </SectionCard>
+      );
+    }
+
+    // 카테고리별 평균 지출 vs 내 지출 (그룹 막대)
+    function ExpenseCompareCard({ avg, myExpenses, animate }) {
+      const a = avg || {};
+      // 한 카테고리 안에서 두 막대(평균/내지출)를 같은 스케일로: 전체 최댓값 기준
+      const allVals = EXPENSE_FIELDS.flatMap((f) => [Number(a[f.key]) || 0, Number(myExpenses[f.key]) || 0]);
+      const max = Math.max(1, ...allVals);
+      return (
+        <SectionCard title="카테고리별 지출 비교" sub="전체 평균 대비 내 월 지출">
+          <div className="space-y-5">
+            {EXPENSE_FIELDS.map((f) => {
+              const avgV = Number(a[f.key]) || 0;
+              const myV = Number(myExpenses[f.key]) || 0;
+              const diff = myV - avgV;
+              const higher = diff > 0;
+              return (
+                <div key={f.key}>
+                  <div className="mb-1.5 flex items-baseline justify-between">
+                    <span className="text-sm font-semibold text-gray-700">{f.label}</span>
+                    <span className={'text-xs font-medium ' + (diff === 0 ? 'text-gray-400' : higher ? 'text-rose-500' : 'text-emerald-600')}>
+                      {diff === 0 ? '평균과 동일' : `평균보다 ${won(Math.abs(diff))} ${higher ? '많음' : '적음'}`}
+                    </span>
+                  </div>
+                  {/* 평균 막대 */}
+                  <div className="flex items-center gap-2">
+                    <span className="w-9 shrink-0 text-[11px] text-gray-400">평균</span>
+                    <div className="flex-1"><Bar pct={(avgV / max) * 100} color="bg-gray-300" animate={animate} /></div>
+                    <span className="w-14 shrink-0 text-right text-xs tabular-nums text-gray-500">{won(avgV)}</span>
+                  </div>
+                  {/* 내 지출 막대 */}
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <span className="w-9 shrink-0 text-[11px] font-semibold text-apple-blue">내 지출</span>
+                    <div className="flex-1"><Bar pct={(myV / max) * 100} color={higher ? 'bg-rose-400' : 'bg-apple-blue'} animate={animate} /></div>
+                    <span className="w-14 shrink-0 text-right text-xs font-semibold tabular-nums text-gray-700">{won(myV)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      );
+    }
+
+    // 직군별 평균 월급 (보너스) — 내 직군 하이라이트
+    function ByJobCard({ byJob, myJob, animate }) {
+      const list = (Array.isArray(byJob) ? byJob : []).slice().sort((x, y) => (Number(y.avgSalary) || 0) - (Number(x.avgSalary) || 0));
+      if (list.length === 0) return null;
+      const max = Math.max(1, ...list.map((d) => Number(d.avgSalary) || 0));
+      return (
+        <SectionCard title="직군별 평균 월급" sub="내 직군은 파란색으로 표시돼요">
+          <div className="space-y-2.5">
+            {list.map((d) => {
+              const v = Number(d.avgSalary) || 0;
+              const mine = d.jobCategory === myJob;
+              return (
+                <div key={d.jobCategory} className="flex items-center gap-3">
+                  <span className={'w-20 shrink-0 truncate text-right text-xs ' + (mine ? 'font-bold text-apple-blue' : 'text-gray-500')} title={d.jobCategory}>{d.jobCategory}</span>
+                  <div className="flex-1"><Bar pct={(v / max) * 100} color={mine ? 'bg-apple-blue' : 'bg-gray-200'} animate={animate} /></div>
+                  <span className={'w-14 shrink-0 text-right text-xs tabular-nums ' + (mine ? 'font-bold text-apple-blue' : 'text-gray-400')}>{won(v)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      );
+    }
+
+    // ============================================================
+    // 📄 결과 화면 (조립)
+    // ============================================================
+    function ResultView({ input, stats, onRestart }) {
+      // 막대 진입 애니메이션: 마운트 직후 한 프레임 뒤 0 → 목표치
+      const [animate, setAnimate] = useState(false);
+      useEffect(() => {
+        const t = setTimeout(() => setAnimate(true), 60);
+        window.scrollTo({ top: 0 });
+        return () => clearTimeout(t);
+      }, []);
+
+      const s = stats || {};
+      const myExpenses = useMemo(() => {
+        const out = {};
+        for (const f of EXPENSE_FIELDS) out[f.key] = Math.max(0, Math.round(Number(input.expenses[f.key]) || 0));
+        return out;
+      }, [input]);
+
+      return (
+        <div className="space-y-4">
+          <header className="animate-fadeUp pb-1 pt-2 text-center">
+            <h2 className="text-2xl font-bold tracking-tight text-gray-900">비교 결과</h2>
+            <p className="mt-1 text-sm text-gray-500">{input.jobCategory} · {fmt(input.years || 0)}년차 기준</p>
+          </header>
+
+          <RankHero my={s.my} count={s.count} animate={animate} />
+          <SummaryCard salary={s.salary} count={s.count} />
+          <DistributionCard distribution={s.salary && s.salary.distribution} myBucket={s.my ? s.my.bucketIndex : -1} animate={animate} />
+          <ExpenseCompareCard avg={s.expenses && s.expenses.avg} myExpenses={myExpenses} animate={animate} />
+          <ByJobCard byJob={s.byJob} myJob={input.jobCategory} animate={animate} />
+
+          <div className="sticky bottom-4 z-10 pt-2">
+            <button
+              type="button"
+              onClick={onRestart}
+              className="w-full rounded-full bg-gray-900 px-6 py-4 text-base font-semibold text-white shadow-xl transition hover:bg-black active:scale-[.98]"
+            >
+              다시 입력하기
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // 🚀 App
+    // ============================================================
+    function App() {
+      const saved = useMemo(loadSaved, []);
+      // 저장된 결과가 있으면 바로 결과 화면, 없으면 폼
+      const [phase, setPhase] = useState(saved && saved.input && saved.stats ? 'result' : 'form'); // 'form' | 'result'
+      const [input, setInput] = useState(saved && saved.input ? saved.input : null);
+      const [stats, setStats] = useState(saved && saved.stats ? saved.stats : null);
+      const [submitting, setSubmitting] = useState(false);
+      const [serverError, setServerError] = useState(null);
+
+      const handleSubmit = useCallback(async (formInput) => {
+        setSubmitting(true);
+        setServerError(null);
+        const body = buildEntryBody(formInput);
+        try {
+          // 1) 익명 제출
+          await api('/api/entries', { method: 'POST', body: JSON.stringify(body) });
+          // 2) 내 월급 기준 통계 조회
+          const data = await api('/api/stats?salary=' + encodeURIComponent(body.monthlySalary));
+          // formInput 의 빈 지출칸을 0 으로 정규화해 저장(결과 재방문 시 일관)
+          const normInput = { ...formInput, expenses: body.expenses, years: body.years, monthlySalary: body.monthlySalary };
+          setInput(normInput);
+          setStats(data);
+          saveResult({ input: normInput, stats: data, savedAt: Date.now() });
+          setPhase('result');
+          window.scrollTo({ top: 0 });
+        } catch (e) {
+          setServerError(e.message || '제출에 실패했어요. 잠시 후 다시 시도해 주세요.');
+        } finally {
+          setSubmitting(false);
+        }
+      }, []);
+
+      const handleRestart = useCallback(() => {
+        clearSaved();
+        setInput(null);
+        setStats(null);
+        setServerError(null);
+        setPhase('form');
+        window.scrollTo({ top: 0 });
+      }, []);
+
+      return (
+        <div className="mx-auto w-full max-w-xl px-4 pb-16 sm:px-5">
+          <header className="pb-5 pt-9 text-center">
+            <div className="mb-3 select-none text-5xl">💰</div>
+            <h1 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">익명 연봉·지출 비교</h1>
+            <p className="mx-auto mt-2.5 max-w-sm text-[15px] leading-relaxed text-gray-500">
+              내 월급과 지출, 다른 사람들과 비교하면 어디쯤일까요? 익명으로 입력하고 한눈에 확인하세요.
+            </p>
+          </header>
+
+          {phase === 'form'
+            ? <EntryForm onSubmit={handleSubmit} submitting={submitting} serverError={serverError} />
+            : <ResultView input={input} stats={stats} onRestart={handleRestart} />}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

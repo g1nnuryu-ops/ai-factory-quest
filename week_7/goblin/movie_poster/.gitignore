@@ -1,0 +1,14 @@
+# API 키 — 절대 커밋 금지
+.env
+*.env
+
+# 생성 중간 산출물
+out/
+
+# A안 산출물 — 공식 스틸 원본 + 실제 배우 얼굴로 합성한 버전.
+# 저작권 자료라 커밋·배포하지 않는다. 공개용은 poster.png(B안, AI 생성) 하나뿐.
+# 자세한 내용은 HANDOFF-AI-GENERATED.md §0 참고.
+poster-real.html
+poster-real-stills.png
+poster-ai.html
+poster-gpt-image-2.png

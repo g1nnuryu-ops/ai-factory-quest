@@ -1,0 +1,16 @@
+{
+  "name": "ai-nickname-generator",
+  "version": "1.0.0",
+  "description": "AI 별명 생성기 — 이름/성격/취미/키워드를 입력하면 OpenAI로 재미있는 한국어 별명을 여러 개 만들어 주는 Express 백엔드 + 단일 index.html 프론트",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "license": "MIT"
+}

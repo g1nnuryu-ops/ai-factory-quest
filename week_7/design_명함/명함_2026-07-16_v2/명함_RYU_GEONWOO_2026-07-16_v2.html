@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>류건우 명함 · RYU GEONWOO · 90×54mm</title>
+
+  <!-- Inline SVG favicon (self-contained, no 404) -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231C2A44'/><text x='16' y='23' font-size='19' text-anchor='middle' fill='%232C7A6B' font-family='sans-serif' font-weight='700'>류</text></svg>" />
+
+  <!-- ===== FONTS (max 2): Pretendard(한글) + IBM Plex Mono(라틴 연락층) ===== -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@latest/dist/web/static/pretendard.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- ===== React 18 UMD + Babel 7 (PINNED — Babel 8 breaks inline JSX → blank screen) ===== -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+
+  <style>
+    /* ========================================================
+       DESIGN TOKENS — 2 colors only (white paper not counted)
+         ink navy   #1C2A44  → 모든 텍스트 · QR · 헤어라인
+         accent     #2C7A6B  → 오직 이름 「류건우」 1곳
+       ======================================================== */
+    :root { --ink: #1C2A44; --accent: #2C7A6B; --paper: #FFFFFF; --scale: 2.6; }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: #E9EBEE;
+      color: var(--ink);
+      font-family: 'Pretendard', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    /* ================= SCREEN VIEWER (화면 전용) ================= */
+    .stage {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 26px;
+      padding: 34px 16px 58px;
+    }
+    .stage-capture { justify-content: center; gap: 16px; padding: 44px 24px; }
+
+    .app-header { text-align: center; max-width: 760px; }
+    .app-header h1 { margin: 0 0 5px; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
+    .app-header p { margin: 0; font-size: 12.5px; color: #5b6472; word-break: keep-all; line-height: 1.5; }
+
+    .viewer { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 42px; }
+    .face-block { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .face-label { font-size: 11.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #6b7482; }
+
+    /* Scaled frame carries the soft shadow + rounded preview corners */
+    .preview-frame {
+      width: calc(90mm * var(--scale));
+      height: calc(54mm * var(--scale));
+      border-radius: calc(2mm * var(--scale));
+      background: var(--paper);
+      box-shadow: 0 20px 44px -14px rgba(28,42,68,0.36), 0 3px 8px rgba(28,42,68,0.12);
+      overflow: hidden;
+    }
+
+    /* ================= THE CARD (true print size) ================= */
+    .card {
+      width: 90mm;
+      height: 54mm;
+      background: var(--paper);
+      color: var(--ink);
+      position: relative;
+      overflow: hidden;
+      transform: scale(var(--scale));
+      transform-origin: top left;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* ---- FRONT — left-aligned identity block ---- */
+    .card-front { padding: 6.4mm 7mm 6mm 7mm; display: flex; flex-direction: column; justify-content: space-between; }
+    /* v2: 연결(network) constellation — quiet ink texture filling the right whitespace, BEHIND the text */
+    .fc-illus { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+    .fc-top, .fc-bottom { display: flex; flex-direction: column; position: relative; z-index: 1; }
+    .name {
+      font-family: 'Pretendard', system-ui, sans-serif;
+      font-weight: 700;
+      font-size: 24pt;              /* LARGEST element on the card */
+      line-height: 1.0;
+      letter-spacing: -0.01em;
+      color: var(--accent);        /* THE ONLY accent-colored element */
+      word-break: keep-all;
+    }
+    .romanized {
+      margin-top: 1.7mm;
+      font-family: 'Pretendard', system-ui, sans-serif;
+      font-weight: 600;
+      font-size: 7pt;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: var(--ink);
+      opacity: 0.82;
+    }
+    .tagline {
+      margin-top: 3.5mm;
+      font-family: 'Pretendard', system-ui, sans-serif;
+      font-weight: 500;
+      font-size: 9.5pt;
+      line-height: 1.35;
+      color: var(--ink);
+      word-break: keep-all;
+    }
+    .hairline { margin: 0; width: 20mm; height: 0.3mm; border: 0; background: var(--ink); opacity: 0.17; }
+    .role {
+      margin-top: 3mm;
+      font-family: 'Pretendard', system-ui, sans-serif;
+      font-weight: 400;
+      font-size: 7pt;
+      line-height: 1.3;
+      color: var(--ink);
+      opacity: 0.66;               /* muted ink (same color, lighter) */
+      word-break: keep-all;
+    }
+    .contacts { margin-top: 3.2mm; display: flex; flex-direction: column; gap: 1.7mm; }
+    .contact {
+      display: flex; align-items: center; gap: 2mm;
+      font-family: 'IBM Plex Mono', monospace;
+      font-weight: 500;
+      font-size: 7.5pt;
+      color: var(--ink);
+    }
+    .contact svg { width: 3.4mm; height: 3.4mm; flex: none; opacity: 0.92; }
+
+    /* ---- BACK — centered, calm ---- */
+    .card-back { padding: 6mm; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5mm; text-align: center; }
+    .slogan {
+      font-family: 'Pretendard', system-ui, sans-serif;
+      font-weight: 600;
+      font-size: 10.5pt;           /* < 24pt front name → single-emphasis holds */
+      line-height: 1.55;
+      color: var(--ink);
+      max-width: 64mm;
+      word-break: keep-all;
+    }
+    .qr-wrap { display: flex; flex-direction: column; align-items: center; gap: 2.6mm; }
+    .qr { width: 21mm; height: 21mm; display: block; }   /* 20–22mm, ink modules + built-in quiet zone */
+    .handle {
+      display: flex; align-items: center; gap: 1.7mm;
+      font-family: 'IBM Plex Mono', monospace;
+      font-weight: 500;
+      font-size: 8pt;
+      letter-spacing: 0.02em;
+      color: var(--ink);
+    }
+    .handle svg { width: 3.6mm; height: 3.6mm; flex: none; }
+
+    /* ================= TOOLBAR / HINT (화면 전용) ================= */
+    .toolbar { display: flex; justify-content: center; }
+    .print-btn {
+      font-family: 'Pretendard', system-ui, sans-serif;
+      font-size: 14px; font-weight: 600;
+      color: #fff; background: var(--ink);
+      border: 0; border-radius: 11px;
+      padding: 12px 24px; cursor: pointer;
+      box-shadow: 0 8px 18px -6px rgba(28,42,68,0.45);
+      transition: transform .12s ease, background .12s ease;
+    }
+    .print-btn:hover { background: #223252; transform: translateY(-1px); }
+    .print-btn:active { transform: translateY(0); }
+    .hint { margin: 0; max-width: 540px; text-align: center; font-size: 12px; line-height: 1.55; color: #6b7482; word-break: keep-all; }
+
+    /* ======================================================
+       PRINT — front = page 1, back = page 2 (양면/duplex)
+       ====================================================== */
+    @page { size: 90mm 54mm; margin: 0; }
+
+    @media print {
+      html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+      .app-header, .face-label, .toolbar, .hint { display: none !important; }
+      .stage { display: block !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important; gap: 0 !important; background: #fff !important; }
+      .viewer { display: block !important; gap: 0 !important; }
+      .face-block {
+        display: block !important;
+        width: 90mm !important; height: 54mm !important;
+        margin: 0 !important; padding: 0 !important; gap: 0 !important;
+        overflow: hidden !important;
+        page-break-after: always; break-after: page;
+      }
+      .face-block:last-child { page-break-after: auto; break-after: auto; }
+      .preview-frame {
+        transform: none !important;
+        width: 90mm !important; height: 54mm !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        overflow: hidden !important;
+        margin: 0 !important;
+      }
+      .card {
+        transform: none !important;
+        transform-origin: top left !important;
+        box-shadow: none !important;
+        width: 90mm !important; height: 54mm !important;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- QR data URI hoisted OUT of text/babel (large base64 can make Babel throw). Encodes https://www.instagram.com/g1nnu ; ink #1C2A44 modules, transparent bg, built-in quiet zone. -->
+  <script>
+    window.QR_URI = "data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0nMS4wJyBlbmNvZGluZz0nVVRGLTgnPz4KPHN2ZyB3aWR0aD0iMzNtbSIgaGVpZ2h0PSIzM21tIiB2ZXJzaW9uPSIxLjEiIHZpZXdCb3g9IjAgMCAzMyAzMyIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMiwySDNWM0gyek0zLDJINFYzSDN6TTQsMkg1VjNINHpNNSwySDZWM0g1ek02LDJIN1YzSDZ6TTcsMkg4VjNIN3pNOCwySDlWM0g4ek0xMSwySDEyVjNIMTF6TTEyLDJIMTNWM0gxMnpNMTQsMkgxNVYzSDE0ek0xNSwySDE2VjNIMTV6TTE2LDJIMTdWM0gxNnpNMTcsMkgxOFYzSDE3ek0xOSwySDIwVjNIMTl6TTIwLDJIMjFWM0gyMHpNMjQsMkgyNVYzSDI0ek0yNSwySDI2VjNIMjV6TTI2LDJIMjdWM0gyNnpNMjcsMkgyOFYzSDI3ek0yOCwySDI5VjNIMjh6TTI5LDJIMzBWM0gyOXpNMzAsMkgzMVYzSDMwek0yLDNIM1Y0SDJ6TTgsM0g5VjRIOHpNMTAsM0gxMVY0SDEwek0xMSwzSDEyVjRIMTF6TTEyLDNIMTNWNEgxMnpNMTMsM0gxNFY0SDEzek0xNywzSDE4VjRIMTd6TTE5LDNIMjBWNEgxOXpNMjAsM0gyMVY0SDIwek0yNCwzSDI1VjRIMjR6TTMwLDNIMzFWNEgzMHpNMiw0SDNWNUgyek00LDRINVY1SDR6TTUsNEg2VjVINXpNNiw0SDdWNUg2ek04LDRIOVY1SDh6TTEwLDRIMTFWNUgxMHpNMTEsNEgxMlY1SDExek0xMyw0SDE0VjVIMTN6TTE2LDRIMTdWNUgxNnpNMTgsNEgxOVY1SDE4ek0yMSw0SDIyVjVIMjF6TTIyLDRIMjNWNUgyMnpNMjQsNEgyNVY1SDI0ek0yNiw0SDI3VjVIMjZ6TTI3LDRIMjhWNUgyN3pNMjgsNEgyOVY1SDI4ek0zMCw0SDMxVjVIMzB6TTIsNUgzVjZIMnpNNCw1SDVWNkg0ek01LDVINlY2SDV6TTYsNUg3VjZINnpNOCw1SDlWNkg4ek0xMCw1SDExVjZIMTB6TTExLDVIMTJWNkgxMXpNMTIsNUgxM1Y2SDEyek0xNiw1SDE3VjZIMTZ6TTE3LDVIMThWNkgxN3pNMTksNUgyMFY2SDE5ek0yMSw1SDIyVjZIMjF6TTIyLDVIMjNWNkgyMnpNMjQsNUgyNVY2SDI0ek0yNiw1SDI3VjZIMjZ6TTI3LDVIMjhWNkgyN3pNMjgsNUgyOVY2SDI4ek0zMCw1SDMxVjZIMzB6TTIsNkgzVjdIMnpNNCw2SDVWN0g0ek01LDZINlY3SDV6TTYsNkg3VjdINnpNOCw2SDlWN0g4ek0xMSw2SDEyVjdIMTF6TTE1LDZIMTZWN0gxNXpNMTYsNkgxN1Y3SDE2ek0xNyw2SDE4VjdIMTd6TTE5LDZIMjBWN0gxOXpNMjAsNkgyMVY3SDIwek0yMSw2SDIyVjdIMjF6TTI0LDZIMjVWN0gyNHpNMjYsNkgyN1Y3SDI2ek0yNyw2SDI4VjdIMjd6TTI4LDZIMjlWN0gyOHpNMzAsNkgzMVY3SDMwek0yLDdIM1Y4SDJ6TTgsN0g5VjhIOHpNMTMsN0gxNFY4SDEzek0xNCw3SDE1VjhIMTR6TTE1LDdIMTZWOEgxNXpNMTYsN0gxN1Y4SDE2ek0xOCw3SDE5VjhIMTh6TTE5LDdIMjBWOEgxOXpNMjIsN0gyM1Y4SDIyek0yNCw3SDI1VjhIMjR6TTMwLDdIMzFWOEgzMHpNMiw4SDNWOUgyek0zLDhINFY5SDN6TTQsOEg1VjlINHpNNSw4SDZWOUg1ek02LDhIN1Y5SDZ6TTcsOEg4VjlIN3pNOCw4SDlWOUg4ek0xMCw4SDExVjlIMTB6TTEyLDhIMTNWOUgxMnpNMTQsOEgxNVY5SDE0ek0xNiw4SDE3VjlIMTZ6TTE4LDhIMTlWOUgxOHpNMjAsOEgyMVY5SDIwek0yMiw4SDIzVjlIMjJ6TTI0LDhIMjVWOUgyNHpNMjUsOEgyNlY5SDI1ek0yNiw4SDI3VjlIMjZ6TTI3LDhIMjhWOUgyN3pNMjgsOEgyOVY5SDI4ek0yOSw4SDMwVjlIMjl6TTMwLDhIMzFWOUgzMHpNMTAsOUgxMVYxMEgxMHpNMTIsOUgxM1YxMEgxMnpNMTUsOUgxNlYxMEgxNXpNMjIsOUgyM1YxMEgyMnpNMiwxMEgzVjExSDJ6TTgsMTBIOVYxMUg4ek0xMCwxMEgxMVYxMUgxMHpNMTIsMTBIMTNWMTFIMTJ6TTE0LDEwSDE1VjExSDE0ek0xNiwxMEgxN1YxMUgxNnpNMTcsMTBIMThWMTFIMTd6TTE5LDEwSDIwVjExSDE5ek0yMSwxMEgyMlYxMUgyMXpNMjMsMTBIMjRWMTFIMjN6TTI0LDEwSDI1VjExSDI0ek0yNywxMEgyOFYxMUgyN3pNMjgsMTBIMjlWMTFIMjh6TTI5LDEwSDMwVjExSDI5ek0zLDExSDRWMTJIM3pNNCwxMUg1VjEySDR6TTUsMTFINlYxMkg1ek0xMCwxMUgxMVYxMkgxMHpNMTEsMTFIMTJWMTJIMTF6TTEzLDExSDE0VjEySDEzek0xNCwxMUgxNVYxMkgxNHpNMTYsMTFIMTdWMTJIMTZ6TTE5LDExSDIwVjEySDE5ek0yMCwxMUgyMVYxMkgyMHpNMjEsMTFIMjJWMTJIMjF6TTI1LDExSDI2VjEySDI1ek0yNiwxMUgyN1YxMkgyNnpNMjgsMTFIMjlWMTJIMjh6TTI5LDExSDMwVjEySDI5ek0yLDEySDNWMTNIMnpNNCwxMkg1VjEzSDR6TTYsMTJIN1YxM0g2ek04LDEySDlWMTNIOHpNMTEsMTJIMTJWMTNIMTF6TTEyLDEySDEzVjEzSDEyek0xNCwxMkgxNVYxM0gxNHpNMjIsMTJIMjNWMTNIMjJ6TTIzLDEySDI0VjEzSDIzek0yNCwxMkgyNVYxM0gyNHpNMiwxM0gzVjE0SDJ6TTMsMTNINFYxNEgzek00LDEzSDVWMTRINHpNNiwxM0g3VjE0SDZ6TTEwLDEzSDExVjE0SDEwek0xNCwxM0gxNVYxNEgxNHpNMTYsMTNIMTdWMTRIMTZ6TTE3LDEzSDE4VjE0SDE3ek0xOCwxM0gxOVYxNEgxOHpNMjMsMTNIMjRWMTRIMjN6TTI1LDEzSDI2VjE0SDI1ek0yNywxM0gyOFYxNEgyN3pNMywxNEg0VjE1SDN6TTQsMTRINVYxNUg0ek01LDE0SDZWMTVINXpNNiwxNEg3VjE1SDZ6TTcsMTRIOFYxNUg3ek04LDE0SDlWMTVIOHpNMTAsMTRIMTFWMTVIMTB6TTEyLDE0SDEzVjE1SDEyek0xMywxNEgxNFYxNUgxM3pNMTUsMTRIMTZWMTVIMTV6TTE2LDE0SDE3VjE1SDE2ek0yMCwxNEgyMVYxNUgyMHpNMjEsMTRIMjJWMTVIMjF6TTIyLDE0SDIzVjE1SDIyek0yNCwxNEgyNVYxNUgyNHpNMjUsMTRIMjZWMTVIMjV6TTMwLDE0SDMxVjE1SDMwek00LDE1SDVWMTZINHpNMTEsMTVIMTJWMTZIMTF6TTEyLDE1SDEzVjE2SDEyek0xNSwxNUgxNlYxNkgxNXpNMTYsMTVIMTdWMTZIMTZ6TTE5LDE1SDIwVjE2SDE5ek0yMCwxNUgyMVYxNkgyMHpNMjEsMTVIMjJWMTZIMjF6TTIyLDE1SDIzVjE2SDIyek0yNCwxNUgyNVYxNkgyNHpNMjYsMTVIMjdWMTZIMjZ6TTI5LDE1SDMwVjE2SDI5ek0zMCwxNUgzMVYxNkgzMHpNMywxNkg0VjE3SDN6TTgsMTZIOVYxN0g4ek0xMCwxNkgxMVYxN0gxMHpNMTMsMTZIMTRWMTdIMTN6TTE1LDE2SDE2VjE3SDE1ek0xNiwxNkgxN1YxN0gxNnpNMTcsMTZIMThWMTdIMTd6TTE4LDE2SDE5VjE3SDE4ek0xOSwxNkgyMFYxN0gxOXpNMjQsMTZIMjVWMTdIMjR6TTI1LDE2SDI2VjE3SDI1ek0yNywxNkgyOFYxN0gyN3pNMjgsMTZIMjlWMTdIMjh6TTMsMTdINFYxOEgzek00LDE3SDVWMThINHpNNiwxN0g3VjE4SDZ6TTEwLDE3SDExVjE4SDEwek0xMSwxN0gxMlYxOEgxMXpNMTQsMTdIMTVWMThIMTR6TTE1LDE3SDE2VjE4SDE1ek0xNiwxN0gxN1YxOEgxNnpNMTgsMTdIMTlWMThIMTh6TTIxLDE3SDIyVjE4SDIxek0yMiwxN0gyM1YxOEgyMnpNMjUsMTdIMjZWMThIMjV6TTI2LDE3SDI3VjE4SDI2ek0yOCwxN0gyOVYxOEgyOHpNMzAsMTdIMzFWMThIMzB6TTIsMThIM1YxOUgyek01LDE4SDZWMTlINXpNNywxOEg4VjE5SDd6TTgsMThIOVYxOUg4ek0xMSwxOEgxMlYxOUgxMXpNMTQsMThIMTVWMTlIMTR6TTE2LDE4SDE3VjE5SDE2ek0xNywxOEgxOFYxOUgxN3pNMTksMThIMjBWMTlIMTl6TTIyLDE4SDIzVjE5SDIyek0yNSwxOEgyNlYxOUgyNXpNMjcsMThIMjhWMTlIMjd6TTI4LDE4SDI5VjE5SDI4ek0yLDE5SDNWMjBIMnpNNSwxOUg2VjIwSDV6TTYsMTlIN1YyMEg2ek03LDE5SDhWMjBIN3pNMTQsMTlIMTVWMjBIMTR6TTE4LDE5SDE5VjIwSDE4ek0yMCwxOUgyMVYyMEgyMHpNMjEsMTlIMjJWMjBIMjF6TTIyLDE5SDIzVjIwSDIyek0yMywxOUgyNFYyMEgyM3pNMjQsMTlIMjVWMjBIMjR6TTI1LDE5SDI2VjIwSDI1ek0yNiwxOUgyN1YyMEgyNnpNMjgsMTlIMjlWMjBIMjh6TTI5LDE5SDMwVjIwSDI5ek0zMCwxOUgzMVYyMEgzMHpNMiwyMEgzVjIxSDJ6TTMsMjBINFYyMUgzek00LDIwSDVWMjFINHpNNywyMEg4VjIxSDd6TTgsMjBIOVYyMUg4ek05LDIwSDEwVjIxSDl6TTExLDIwSDEyVjIxSDExek0xMiwyMEgxM1YyMUgxMnpNMTMsMjBIMTRWMjFIMTN6TTE1LDIwSDE2VjIxSDE1ek0xNiwyMEgxN1YyMUgxNnpNMTgsMjBIMTlWMjFIMTh6TTIxLDIwSDIyVjIxSDIxek0yMywyMEgyNFYyMUgyM3pNMjQsMjBIMjVWMjFIMjR6TTI3LDIwSDI4VjIxSDI3ek0zMCwyMEgzMVYyMUgzMHpNMiwyMUgzVjIySDJ6TTYsMjFIN1YyMkg2ek03LDIxSDhWMjJIN3pNMTIsMjFIMTNWMjJIMTJ6TTEzLDIxSDE0VjIySDEzek0xNiwyMUgxN1YyMkgxNnpNMTcsMjFIMThWMjJIMTd6TTE4LDIxSDE5VjIySDE4ek0yMSwyMUgyMlYyMkgyMXpNMjIsMjFIMjNWMjJIMjJ6TTIzLDIxSDI0VjIySDIzek0yNCwyMUgyNVYyMkgyNHpNMjUsMjFIMjZWMjJIMjV6TTI2LDIxSDI3VjIySDI2ek0yLDIySDNWMjNIMnpNNCwyMkg1VjIzSDR6TTYsMjJIN1YyM0g2ek04LDIySDlWMjNIOHpNMTAsMjJIMTFWMjNIMTB6TTExLDIySDEyVjIzSDExek0xOSwyMkgyMFYyM0gxOXpNMjAsMjJIMjFWMjNIMjB6TTIyLDIySDIzVjIzSDIyek0yMywyMkgyNFYyM0gyM3pNMjQsMjJIMjVWMjNIMjR6TTI1LDIySDI2VjIzSDI1ek0yNiwyMkgyN1YyM0gyNnpNMjgsMjJIMjlWMjNIMjh6TTI5LDIySDMwVjIzSDI5ek0zMCwyMkgzMVYyM0gzMHpNMTAsMjNIMTFWMjRIMTB6TTE1LDIzSDE2VjI0SDE1ek0xOCwyM0gxOVYyNEgxOHpNMjIsMjNIMjNWMjRIMjJ6TTI2LDIzSDI3VjI0SDI2ek0yNywyM0gyOFYyNEgyN3pNMiwyNEgzVjI1SDJ6TTMsMjRINFYyNUgzek00LDI0SDVWMjVINHpNNSwyNEg2VjI1SDV6TTYsMjRIN1YyNUg2ek03LDI0SDhWMjVIN3pNOCwyNEg5VjI1SDh6TTExLDI0SDEyVjI1SDExek0xNSwyNEgxNlYyNUgxNXpNMTYsMjRIMTdWMjVIMTZ6TTE3LDI0SDE4VjI1SDE3ek0xOCwyNEgxOVYyNUgxOHpNMjAsMjRIMjFWMjVIMjB6TTIxLDI0SDIyVjI1SDIxek0yMiwyNEgyM1YyNUgyMnpNMjQsMjRIMjVWMjVIMjR6TTI2LDI0SDI3VjI1SDI2ek0yNywyNEgyOFYyNUgyN3pNMjgsMjRIMjlWMjVIMjh6TTIsMjVIM1YyNkgyek04LDI1SDlWMjZIOHpNMTIsMjVIMTNWMjZIMTJ6TTEzLDI1SDE0VjI2SDEzek0xNCwyNUgxNVYyNkgxNHpNMTUsMjVIMTZWMjZIMTV6TTE4LDI1SDE5VjI2SDE4ek0yMSwyNUgyMlYyNkgyMXpNMjIsMjVIMjNWMjZIMjJ6TTI2LDI1SDI3VjI2SDI2ek0yOSwyNUgzMFYyNkgyOXpNMzAsMjVIMzFWMjZIMzB6TTIsMjZIM1YyN0gyek00LDI2SDVWMjdINHpNNSwyNkg2VjI3SDV6TTYsMjZIN1YyN0g2ek04LDI2SDlWMjdIOHpNMTEsMjZIMTJWMjdIMTF6TTE1LDI2SDE2VjI3SDE1ek0xNywyNkgxOFYyN0gxN3pNMjEsMjZIMjJWMjdIMjF6TTIyLDI2SDIzVjI3SDIyek0yMywyNkgyNFYyN0gyM3pNMjQsMjZIMjVWMjdIMjR6TTI1LDI2SDI2VjI3SDI1ek0yNiwyNkgyN1YyN0gyNnpNMjcsMjZIMjhWMjdIMjd6TTIsMjdIM1YyOEgyek00LDI3SDVWMjhINHpNNSwyN0g2VjI4SDV6TTYsMjdIN1YyOEg2ek04LDI3SDlWMjhIOHpNMTEsMjdIMTJWMjhIMTF6TTEyLDI3SDEzVjI4SDEyek0xMywyN0gxNFYyOEgxM3pNMTQsMjdIMTVWMjhIMTR6TTE1LDI3SDE2VjI4SDE1ek0xNywyN0gxOFYyOEgxN3pNMTgsMjdIMTlWMjhIMTh6TTE5LDI3SDIwVjI4SDE5ek0yMCwyN0gyMVYyOEgyMHpNMjEsMjdIMjJWMjhIMjF6TTIzLDI3SDI0VjI4SDIzek0yNSwyN0gyNlYyOEgyNXpNMjcsMjdIMjhWMjhIMjd6TTI4LDI3SDI5VjI4SDI4ek0yOSwyN0gzMFYyOEgyOXpNMiwyOEgzVjI5SDJ6TTQsMjhINVYyOUg0ek01LDI4SDZWMjlINXpNNiwyOEg3VjI5SDZ6TTgsMjhIOVYyOUg4ek0xMSwyOEgxMlYyOUgxMXpNMTMsMjhIMTRWMjlIMTN6TTE0LDI4SDE1VjI5SDE0ek0xNSwyOEgxNlYyOUgxNXpNMTcsMjhIMThWMjlIMTd6TTE5LDI4SDIwVjI5SDE5ek0yNCwyOEgyNVYyOUgyNHpNMjUsMjhIMjZWMjlIMjV6TTI2LDI4SDI3VjI5SDI2ek0yNywyOEgyOFYyOUgyN3pNMjgsMjhIMjlWMjlIMjh6TTI5LDI4SDMwVjI5SDI5ek0yLDI5SDNWMzBIMnpNOCwyOUg5VjMwSDh6TTExLDI5SDEyVjMwSDExek0xMiwyOUgxM1YzMEgxMnpNMTcsMjlIMThWMzBIMTd6TTIwLDI5SDIxVjMwSDIwek0yMywyOUgyNFYzMEgyM3pNMjQsMjlIMjVWMzBIMjR6TTI1LDI5SDI2VjMwSDI1ek0yNywyOUgyOFYzMEgyN3pNMjgsMjlIMjlWMzBIMjh6TTMwLDI5SDMxVjMwSDMwek0yLDMwSDNWMzFIMnpNMywzMEg0VjMxSDN6TTQsMzBINVYzMUg0ek01LDMwSDZWMzFINXpNNiwzMEg3VjMxSDZ6TTcsMzBIOFYzMUg3ek04LDMwSDlWMzFIOHpNMTAsMzBIMTFWMzFIMTB6TTExLDMwSDEyVjMxSDExek0xMiwzMEgxM1YzMUgxMnpNMTYsMzBIMTdWMzFIMTZ6TTE5LDMwSDIwVjMxSDE5ek0yMSwzMEgyMlYzMUgyMXpNMjMsMzBIMjRWMzFIMjN6TTI1LDMwSDI2VjMxSDI1ek0yNiwzMEgyN1YzMUgyNnpNMjcsMzBIMjhWMzFIMjd6TTI4LDMwSDI5VjMxSDI4eiIgaWQ9InFyLXBhdGgiIGZpbGw9IiMxQzJBNDQiIGZpbGwtb3BhY2l0eT0iMSIgZmlsbC1ydWxlPSJub256ZXJvIiBzdHJva2U9Im5vbmUiLz48L3N2Zz4=";
+  </script>
+
+  <script type="text/babel">
+    // ========================================================
+    // React hooks
+    // ========================================================
+    const { useState } = React;
+
+    // ========================================================
+    // 🎨 Inline line icons (all ink #1C2A44 — structural, not accent)
+    // ========================================================
+    function MailIcon() {
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="#1C2A44" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="5" width="18" height="14" rx="2.2" />
+          <path d="M3.5 7l8.5 6 8.5-6" />
+        </svg>
+      );
+    }
+    function PhoneIcon() {
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="#1C2A44" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M6.4 3h3l1.5 4-2 1.5a12 12 0 0 0 5.6 5.6l1.5-2 4 1.5v3a2 2 0 0 1-2 2A16 16 0 0 1 4.4 5a2 2 0 0 1 2-2z" />
+        </svg>
+      );
+    }
+    function InstaIcon() {
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="#1C2A44" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="5" />
+          <circle cx="12" cy="12" r="4" />
+          <circle cx="17.4" cy="6.6" r="0.9" fill="#1C2A44" stroke="none" />
+        </svg>
+      );
+    }
+
+    // ========================================================
+    // 🕸 v2 — "연결(Connection)" network constellation (hand-authored SVG)
+    //   ink #1C2A44 at reduced opacity = quiet texture; ONE teal whisper node.
+    //   viewBox 0 0 90 54 → 1 user unit = 1mm. Routed to avoid the text.
+    // ========================================================
+    const INK = "#1C2A44";
+    const TEAL = "#2C7A6B";
+
+    function FrontConstellation() {
+      return (
+        <svg className="fc-illus" viewBox="0 0 90 54" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+          {/* v2.1: identity-connector curve REMOVED (it overlapped the tagline "사람"); whole constellation nudged up-right via translate(3.5,-5). */}
+          <g transform="translate(3.5, -5)">
+            {/* thin connectors — clearly visible yet subtle (~30–36% ink), UNIFORM weight so it reads as ONE connected network. Line ends tuck under the node circles (drawn after) for clean joins. */}
+            <g fill="none" stroke={INK} strokeLinecap="round">
+              <line x1="57" y1="23" x2="66" y2="12" strokeWidth="0.28" strokeOpacity="0.36" />
+              <line x1="57" y1="23" x2="70" y2="27.5" strokeWidth="0.28" strokeOpacity="0.36" />
+              <line x1="57" y1="23" x2="62" y2="34" strokeWidth="0.26" strokeOpacity="0.32" />
+              <line x1="66" y1="12" x2="75.5" y2="17" strokeWidth="0.26" strokeOpacity="0.34" />
+              <line x1="75.5" y1="17" x2="80" y2="21" strokeWidth="0.26" strokeOpacity="0.34" />
+              <line x1="80" y1="21" x2="79" y2="31" strokeWidth="0.26" strokeOpacity="0.32" />
+              <line x1="70" y1="27.5" x2="79" y2="31" strokeWidth="0.26" strokeOpacity="0.34" />
+              <line x1="70" y1="27.5" x2="62" y2="34" strokeWidth="0.26" strokeOpacity="0.32" />
+              <line x1="79" y1="31" x2="73.5" y2="40" strokeWidth="0.26" strokeOpacity="0.32" />
+              <line x1="66" y1="12" x2="80" y2="12.5" strokeWidth="0.24" strokeOpacity="0.3" />
+            </g>
+            {/* nodes — ink, varied weight; drawn AFTER the lines so every join looks clean and connected. */}
+            <g stroke="none">
+              <circle cx="57" cy="23" r="1.15" fill={INK} fillOpacity="0.72" />
+              <circle cx="66" cy="12" r="0.9" fill={INK} fillOpacity="0.64" />
+              <circle cx="75.5" cy="17" r="0.72" fill={INK} fillOpacity="0.56" />
+              <circle cx="70" cy="27.5" r="0.85" fill={INK} fillOpacity="0.6" />
+              <circle cx="79" cy="31" r="0.75" fill={INK} fillOpacity="0.56" />
+              <circle cx="62" cy="34" r="0.62" fill={INK} fillOpacity="0.52" />
+              <circle cx="73.5" cy="40" r="0.7" fill={INK} fillOpacity="0.54" />
+              <circle cx="80" cy="12.5" r="0.54" fill={INK} fillOpacity="0.48" />
+              {/* the single accent whisper — one teal node, kept subtle so the NAME stays the emphasis */}
+              <circle cx="80" cy="21" r="0.95" fill={TEAL} fillOpacity="0.62" />
+            </g>
+          </g>
+        </svg>
+      );
+    }
+
+    // ========================================================
+    // 📄 FRONT — Identity (name is the single focal point)
+    // ========================================================
+    function CardFront() {
+      return (
+        <div className="card card-front" role="img" aria-label="명함 앞면 — 류건우 RYU GEONWOO, 연결을 상징하는 네트워크 그래픽 포함">
+          <FrontConstellation />
+          <div className="fc-top">
+            <div className="name">류건우</div>
+            <div className="romanized">RYU&nbsp;GEONWOO</div>
+            <div className="tagline">기술을 사람의 언어로 옮기는 사람.</div>
+          </div>
+          <div className="fc-bottom">
+            <hr className="hairline" />
+            <div className="role">AI · 디지털 전환 교육 기획·운영&nbsp;&nbsp;|&nbsp;&nbsp;광고PR · ESG 연구</div>
+            <div className="contacts">
+              <div className="contact"><MailIcon /><span>hello@example.com</span></div>
+              <div className="contact"><PhoneIcon /><span>010-0000-0000</span></div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================================
+    // 📄 BACK — What I do (slogan + QR)
+    // ========================================================
+    function CardBack() {
+      return (
+        <div className="card card-back" role="img" aria-label="명함 뒷면 — 슬로건과 인스타그램 QR">
+          <div className="slogan">AI로 만들고, PR로 잇고, 교육으로 전합니다.</div>
+          <div className="qr-wrap">
+            <img className="qr" src={window.QR_URI} alt="인스타그램 @g1nnu QR 코드" />
+            <div className="handle"><InstaIcon /><span>@g1nnu</span></div>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================================
+    // 🧩 Face block (screen label + scaled preview frame)
+    // ========================================================
+    function FaceBlock({ label, children }) {
+      return (
+        <div className="face-block">
+          <div className="face-label">{label}</div>
+          <div className="preview-frame">{children}</div>
+        </div>
+      );
+    }
+
+    // ========================================================
+    // 🚀 App
+    // ========================================================
+    function App() {
+      // ?face=front / ?face=back → isolated single-face capture (for preview PNGs)
+      const only = new URLSearchParams(window.location.search).get("face");
+
+      if (only === "front" || only === "back") {
+        return (
+          <div className="stage stage-capture">
+            {only === "front"
+              ? <FaceBlock label="앞면 · FRONT"><CardFront /></FaceBlock>
+              : <FaceBlock label="뒷면 · BACK"><CardBack /></FaceBlock>}
+          </div>
+        );
+      }
+
+      return (
+        <div className="stage">
+          <header className="app-header">
+            <h1>류건우 · RYU GEONWOO — 개인 명함</h1>
+            <p>표준 명함 90 × 54 mm · 양면 · 아래 미리보기는 화면 확인용으로 약 2.6배 확대되어 있습니다.</p>
+          </header>
+
+          <div className="viewer">
+            <FaceBlock label="앞면 · FRONT"><CardFront /></FaceBlock>
+            <FaceBlock label="뒷면 · BACK"><CardBack /></FaceBlock>
+          </div>
+
+          <div className="toolbar">
+            <button className="print-btn" onClick={() => window.print()}>🖨 인쇄 / PDF로 저장</button>
+          </div>
+          <p className="hint">인쇄 대화상자에서 용지 90×54mm · 여백 없음으로 저장하세요. 1페이지=앞면, 2페이지=뒷면 (양면/듀플렉스 인쇄).</p>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

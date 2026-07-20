@@ -1,0 +1,17 @@
+This is a PHOTO-COMPOSITING task, not a reimagining. You are laying out three existing photographs into a movie poster. Treat the three reference photographs as the actual source material to be cut out and arranged.
+
+ABSOLUTE RULE — FACES: Do NOT redraw, reinterpret, beautify, age, or replace any face. Each man's face must be COPIED EXACTLY from his reference photograph: identical bone structure, identical eyes, nose, mouth, jawline, hairline, identical age and skin. If you change a face, the task has failed. Keep every man's identity pixel-faithful to his own reference photo.
+
+LAYOUT — vertical 2:3 movie poster, three diagonal bands stacked top to bottom, separated by thin hard seams tilted about 8 degrees off horizontal:
+
+- TOP BAND (upper ~40%): the man from reference photo 1 — black suit, seated behind a heavy desk, Korean national flag behind him, hands clasped, staring straight out at the viewer. Warm amber side light.
+- MIDDLE BAND (~25%): the man from reference photo 2 — dark military uniform with general's insignia, telephone receiver at his ear, three-quarter profile, eyes lifted UPWARD. Warm lamp light, deep shadow.
+- BOTTOM BAND (~20%): the man from reference photo 3 — navy work jacket, wire glasses, standing before a wall of pinned photographs and case documents, looking UPWARD. Cold steel-blue light, distinctly cooler than the other two.
+
+The three gazes must cross and never meet.
+
+GRADE: 1970s period noir. Very dark, low saturation. Near-black background with a faint blue-grey cast, never pure black. Hard single-source light carving faces from darkness. Heavy 35mm film grain and print texture over the whole frame. Crushed shadows. Grim and restrained.
+
+CRITICAL:
+- The BOTTOM 20% of the frame must be clean, empty, near-black darkness. Nothing in it at all.
+- ZERO text. No letters, no words, no logos, no typography, no captions, no writing of any kind anywhere in the image.

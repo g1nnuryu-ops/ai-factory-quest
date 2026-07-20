@@ -1,0 +1,4 @@
+# week_6 공유 환경변수 — 이 폴더의 .env 에 DATABASE_URL(Supabase)·OPENAI_API_KEY 등 비밀값이 들어있다.
+# 이 quest 트리는 공개 저장소로 자동 동기화되므로 .env 가 절대 커밋되면 안 된다.
+.env
+.env.*

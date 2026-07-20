@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>놀담 대시보드 · 파주 키즈 브런치 카페</title>
+
+  <!-- Pretendard (모던 한글 폰트) — 버전 고정 -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
+  />
+
+  <!-- Tailwind CDN (버전 고정) -->
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script>
+    // Tailwind CDN 은 window.tailwind.config 를 읽어 커스텀 토큰을 적용한다.
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            // 세이지(메인) · 테라코타(포인트) · 크림(배경)
+            sage: {
+              50: '#f2f6f2', 100: '#e1ece3', 200: '#c4d8c8', 300: '#9dbca4',
+              400: '#749a7d', 500: '#5a8064', 600: '#47684f', 700: '#3a5341',
+              800: '#314536', 900: '#293a2e',
+            },
+            terracotta: {
+              50: '#fbf2ec', 100: '#f5ddcf', 200: '#eabca4', 300: '#dd9573',
+              400: '#d0744e', 500: '#c25c39', 600: '#a84930', 700: '#8a3b2a',
+              800: '#713227', 900: '#5f2d24',
+            },
+            cream: '#faf6ef',
+          },
+          fontFamily: {
+            sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'Malgun Gothic', 'Apple SD Gothic Neo', 'sans-serif'],
+          },
+          boxShadow: {
+            soft: '0 6px 24px -8px rgba(75,107,83,0.20)',
+          },
+        },
+      },
+    };
+  </script>
+
+  <!--
+    ⚠️ 모든 CDN 버전 고정. 특히 @babel/standalone 은 반드시 7.x(@7.26.4).
+    미고정/8.x 는 인라인 text/babel(JSX) 변환을 깨뜨려 화면이 백지가 된다.
+  -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+
+  <style>
+    html, body { background: #faf6ef; }
+    .nice-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .nice-scroll::-webkit-scrollbar-thumb { background: #cfe0d3; border-radius: 8px; }
+    .nice-scroll::-webkit-scrollbar-track { background: transparent; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .fade-up { animation: fadeUp .4s ease both; }
+  </style>
+</head>
+<body class="font-sans text-sage-800 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    // ========================================
+    // 0. React Hooks
+    // ========================================
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // Chart.js 전역 기본값 (한글 폰트/색상)
+    if (window.Chart) {
+      window.Chart.defaults.font.family =
+        "Pretendard, -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif";
+      window.Chart.defaults.color = '#5a8064';
+    }
+
+    // ========================================
+    // 1. API 계층 — 토큰 저장소 + fetch 헬퍼(Bearer 주입 + 401 바운스)
+    // ========================================
+    const API_BASE_URL = '/api';            // 상대경로 (동일 오리진)
+    const TOKEN_KEY = 'noldam_token';
+
+    const tokenStore = {
+      get() { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } },
+      set(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {} },
+      clear() { try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} },
+    };
+
+    // 세션 만료(401) 시 전역 바운스 핸들러 (App 이 마운트 시 주입)
+    let unauthorizedHandler = () => {};
+    function setUnauthorizedHandler(fn) { unauthorizedHandler = fn; }
+    class AuthError extends Error {
+      constructor(msg) { super(msg); this.name = 'AuthError'; }
+    }
+
+    async function api(path, opts = {}) {
+      const token = tokenStore.get();
+      const headers = Object.assign({}, opts.headers || {});
+      if (typeof opts.body === 'string') headers['Content-Type'] = 'application/json';
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      let res;
+      try {
+        res = await fetch(API_BASE_URL + path, Object.assign({}, opts, { headers }));
+      } catch (e) {
+        throw new Error('서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.');
+      }
+
+      if (res.status === 401) {
+        tokenStore.clear();
+        unauthorizedHandler();
+        throw new AuthError('세션이 만료되었습니다. 다시 로그인해주세요.');
+      }
+
+      let json = null;
+      try { json = await res.json(); } catch (e) { json = null; }
+
+      if (!res.ok || !json || json.success === false) {
+        const msg = (json && json.message) || ('요청을 처리하지 못했습니다. (HTTP ' + res.status + ')');
+        throw new Error(msg);
+      }
+      return json.data; // 계약: { success, data } → data 만 반환
+    }
+
+    // ========================================
+    // 2. 유틸 (금액/숫자/날짜 포맷)
+    // ========================================
+    const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+    const won = (n) => (Number(n) || 0).toLocaleString('ko-KR') + '원';
+    const num = (n) => (Number(n) || 0).toLocaleString('ko-KR');
+
+    function krDate(str) {
+      if (!str) return '';
+      const [y, m, d] = String(str).split('-').map(Number);
+      const dt = new Date(y, (m || 1) - 1, d || 1); // 로컬 생성 → TZ 밀림 없음
+      return `${y}년 ${m}월 ${d}일 (${DOW[dt.getDay()]})`;
+    }
+    function mmdd(str) {
+      const p = String(str).split('-');
+      return `${Number(p[1])}/${Number(p[2])}`;
+    }
+    function pctDelta(cur, prev) {
+      cur = Number(cur) || 0; prev = Number(prev) || 0;
+      if (prev === 0) return null;
+      return ((cur - prev) / Math.abs(prev)) * 100;
+    }
+
+    // ========================================
+    // 3. 🎨 디자인 시스템 (순수 프레젠테이션)
+    // ========================================
+    function Card({ className = '', children, ...rest }) {
+      return (
+        <div className={`bg-white rounded-2xl shadow-soft border border-sage-100 ${className}`} {...rest}>
+          {children}
+        </div>
+      );
+    }
+
+    function Button({ variant = 'primary', size = 'md', className = '', children, ...rest }) {
+      const base =
+        'inline-flex items-center justify-center gap-1.5 font-semibold rounded-xl transition ' +
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ' +
+        'disabled:opacity-50 disabled:cursor-not-allowed';
+      const variants = {
+        primary: 'bg-sage-500 hover:bg-sage-600 text-white focus-visible:ring-sage-400',
+        secondary: 'bg-sage-50 hover:bg-sage-100 text-sage-700 border border-sage-200 focus-visible:ring-sage-300',
+        terracotta: 'bg-terracotta-500 hover:bg-terracotta-600 text-white focus-visible:ring-terracotta-400',
+        ghost: 'bg-transparent hover:bg-sage-100 text-sage-600 focus-visible:ring-sage-300',
+        danger: 'bg-white hover:bg-red-50 text-red-600 border border-red-200 focus-visible:ring-red-300',
+      };
+      const sizes = { sm: 'text-xs px-2.5 py-1.5', md: 'text-sm px-4 py-2', lg: 'text-base px-5 py-2.5' };
+      return (
+        <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...rest}>
+          {children}
+        </button>
+      );
+    }
+
+    function Badge({ tone = 'sage', className = '', children }) {
+      const tones = {
+        sage: 'bg-sage-100 text-sage-700',
+        terracotta: 'bg-terracotta-100 text-terracotta-700',
+        red: 'bg-red-100 text-red-700',
+        gray: 'bg-slate-100 text-slate-600',
+        amber: 'bg-amber-100 text-amber-800',
+        green: 'bg-emerald-100 text-emerald-700',
+      };
+      return (
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${tones[tone]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return (
+        <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+        </svg>
+      );
+    }
+
+    function Skeleton({ className = '' }) {
+      return <div className={`animate-pulse bg-sage-100 rounded-lg ${className}`} />;
+    }
+
+    function Field({ label, error, id, ...rest }) {
+      return (
+        <label className="block" htmlFor={id}>
+          <span className="block text-sm font-semibold text-sage-700 mb-1">{label}</span>
+          <input
+            id={id}
+            className={`w-full rounded-xl border px-3.5 py-2.5 text-sm bg-white outline-none transition ${
+              error ? 'border-red-300 focus:ring-2 focus:ring-red-200'
+                    : 'border-sage-200 focus:ring-2 focus:ring-sage-300 focus:border-sage-400'
+            }`}
+            {...rest}
+          />
+          {error && <span className="block text-xs text-red-500 mt-1">{error}</span>}
+        </label>
+      );
+    }
+
+    function Segmented({ value, onChange, options, full = false, className = '' }) {
+      return (
+        <div className={`inline-flex bg-sage-100 rounded-xl p-1 ${full ? 'flex w-full' : ''} ${className}`}>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => onChange(o.value)}
+              aria-pressed={value === o.value}
+              className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition ${full ? 'flex-1' : ''} ${
+                value === o.value ? 'bg-white text-sage-700 shadow-sm' : 'text-sage-500 hover:text-sage-700'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function SectionTitle({ emoji, title, desc, right }) {
+      return (
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="min-w-0">
+            <h2 className="text-base font-bold text-sage-800 flex items-center gap-2">
+              <span aria-hidden="true">{emoji}</span>
+              <span className="truncate">{title}</span>
+            </h2>
+            {desc && <p className="text-xs text-sage-500 mt-0.5">{desc}</p>}
+          </div>
+          {right}
+        </div>
+      );
+    }
+
+    function Empty({ msg, emoji = '🫧' }) {
+      return (
+        <div className="flex flex-col items-center justify-center py-10 text-center text-sage-400">
+          <span className="text-2xl mb-1" aria-hidden="true">{emoji}</span>
+          <p className="text-sm">{msg}</p>
+        </div>
+      );
+    }
+
+    function ErrorBox({ msg, onRetry }) {
+      return (
+        <div role="alert" className="flex flex-col items-center justify-center py-8 text-center gap-2 text-red-600">
+          <span className="text-2xl" aria-hidden="true">⚠️</span>
+          <p className="text-sm">{msg}</p>
+          {onRetry && <Button variant="danger" size="sm" onClick={onRetry}>다시 시도</Button>}
+        </div>
+      );
+    }
+
+    function ErrorBanner({ msg, onRetry }) {
+      return (
+        <div role="alert" className="flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 rounded-2xl px-4 py-3 text-sm">
+          <span aria-hidden="true">⚠️</span>
+          <span className="flex-1">{msg}</span>
+          {onRetry && <Button variant="danger" size="sm" onClick={onRetry}>다시 시도</Button>}
+        </div>
+      );
+    }
+
+    function DeltaBadge({ cur, prev, unit = '', goodWhenUp = true }) {
+      const c = Number(cur) || 0, p = Number(prev) || 0;
+      const diff = c - p;
+      const pct = pctDelta(c, p);
+      const flat = diff === 0;
+      const up = diff > 0;
+      const good = flat ? null : up === goodWhenUp;
+      const tone = flat ? 'text-slate-400' : good ? 'text-emerald-600' : 'text-red-500';
+      const arrow = flat ? '–' : up ? '▲' : '▼';
+      return (
+        <span className={`inline-flex items-center gap-1 text-xs font-semibold ${tone}`}>
+          <span aria-hidden="true">{arrow}</span>
+          <span>{Math.abs(diff).toLocaleString('ko-KR')}{unit}</span>
+          {pct !== null && <span className="opacity-70">({up ? '+' : flat ? '' : '-'}{Math.abs(pct).toFixed(1)}%)</span>}
+        </span>
+      );
+    }
+
+    // 체크박스 아이콘
+    function CheckEmpty() {
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 text-sage-300" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+      );
+    }
+    function CheckFilled() {
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 text-sage-500" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M8 12.5l2.5 2.5L16 9" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    }
+
+    const PIE = ['#5a8064', '#d0744e', '#7fa9b8', '#e0b153', '#b98bb0', '#89b98b', '#dd9573', '#6b8fb5'];
+
+    // ========================================
+    // 4. 🧩 대시보드 패널들
+    // ========================================
+
+    // 4-1. AI 오늘의 브리핑 (히어로)
+    function BriefLine({ icon, label, text }) {
+      return (
+        <div className="flex gap-2.5 bg-white/10 rounded-xl p-3">
+          <span className="text-base shrink-0" aria-hidden="true">{icon}</span>
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold text-white/70">{label}</p>
+            <p className="text-sm leading-relaxed text-white/95">{text || '—'}</p>
+          </div>
+        </div>
+      );
+    }
+
+    function BriefingHero({ data, loading, refreshing, error, onRefresh }) {
+      const b = data && data.briefing;
+      const modelLabel = data ? (data.model === 'fallback' ? '기본 요약' : (data.model || 'AI')) : '';
+      return (
+        <Card className="border-0 bg-gradient-to-br from-sage-500 to-sage-700 text-white overflow-hidden fade-up">
+          <div className="p-6 sm:p-7">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-lg" aria-hidden="true">☕️</span>
+                <div>
+                  <p className="text-[11px] font-bold tracking-widest text-white/70">AI 오늘의 브리핑</p>
+                  {data && (
+                    <p className="text-[11px] text-white/60">
+                      {data.date} · {modelLabel}{data.cached ? ' · 캐시됨' : ''}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="secondary" size="sm" onClick={onRefresh} disabled={loading || refreshing}
+                className="bg-white/15 hover:bg-white/25 text-white border-white/25"
+              >
+                {refreshing ? <><Spinner className="w-3.5 h-3.5" /> 생성중</> : <>🔄 새로고침</>}
+              </Button>
+            </div>
+
+            {loading ? (
+              <div className="mt-5 space-y-3">
+                <Skeleton className="h-7 w-2/3 bg-white/25" />
+                <div className="grid sm:grid-cols-2 gap-3 mt-4">
+                  {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full bg-white/15" />)}
+                </div>
+                <Skeleton className="h-9 w-full bg-white/15" />
+              </div>
+            ) : error ? (
+              <div className="mt-5">
+                <p className="font-semibold">브리핑을 불러오지 못했어요.</p>
+                <p className="text-sm text-white/80 mt-1">{error}</p>
+                <Button variant="secondary" size="sm" onClick={onRefresh} className="mt-3 bg-white/15 hover:bg-white/25 text-white border-white/25">
+                  다시 시도
+                </Button>
+              </div>
+            ) : b ? (
+              <div className="mt-4">
+                <h1 className="text-xl sm:text-2xl font-extrabold leading-snug">{b.headline}</h1>
+                <div className="mt-4 grid sm:grid-cols-2 gap-3">
+                  <BriefLine icon="📊" label="어제 매출" text={b.salesReview} />
+                  <BriefLine icon="🔮" label="오늘 예측" text={b.prediction} />
+                  <BriefLine icon="📦" label="재고 · 발주" text={b.inventoryAction} />
+                  <BriefLine icon="✅" label="오늘 할일" text={b.todoReminder} />
+                </div>
+                {b.oneLiner && (
+                  <p className="mt-4 text-center text-sm font-semibold bg-white/10 rounded-xl py-2.5 px-4">
+                    💬 {b.oneLiner}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-5 text-sm text-white/80">표시할 브리핑이 없어요.</p>
+            )}
+          </div>
+        </Card>
+      );
+    }
+
+    // 4-2. KPI 4카드
+    function KpiCard({ emoji, label, value, delta, foot, accent = false }) {
+      return (
+        <Card className={`p-5 fade-up ${accent ? 'ring-1 ring-terracotta-200 bg-terracotta-50/50' : ''}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-sage-500">{label}</span>
+            <span className="text-lg" aria-hidden="true">{emoji}</span>
+          </div>
+          <p className={`mt-2 text-[1.35rem] sm:text-2xl font-extrabold tracking-tight ${accent ? 'text-terracotta-600' : 'text-sage-800'}`}>
+            {value}
+          </p>
+          <div className="mt-1.5 flex items-center gap-2 min-h-[20px] flex-wrap">
+            {delta}
+            {foot && <span className="text-[11px] text-sage-400">{foot}</span>}
+          </div>
+        </Card>
+      );
+    }
+
+    function KpiCards({ kpi, loading }) {
+      if (loading) {
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[0, 1, 2, 3].map((i) => (
+              <Card key={i} className="p-5">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-7 w-32 mt-3" />
+                <Skeleton className="h-4 w-20 mt-2" />
+              </Card>
+            ))}
+          </div>
+        );
+      }
+      if (!kpi) return null;
+      const low = Number(kpi.lowStockCount) || 0;
+      return (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <KpiCard
+            emoji="💰"
+            label={`어제 매출 · ${kpi.latestDate ? kpi.latestDate.slice(5) : ''} (${kpi.latestDow || ''})`}
+            value={won(kpi.latestRevenue)}
+            delta={<DeltaBadge cur={kpi.latestRevenue} prev={kpi.prevRevenue} unit="원" />}
+            foot="전일 대비"
+          />
+          <KpiCard
+            emoji="🧑‍🤝‍🧑"
+            label="어제 방문객"
+            value={num(kpi.latestCustomers) + '명'}
+            delta={<DeltaBadge cur={kpi.latestCustomers} prev={kpi.prevCustomers} unit="명" />}
+            foot="전일 대비"
+          />
+          <KpiCard
+            emoji="📅"
+            label={`이달 누적매출 · ${kpi.monthLabel || ''}`}
+            value={won(kpi.monthRevenue)}
+            delta={<DeltaBadge cur={kpi.monthRevenue} prev={kpi.prevMonthRevenue} unit="원" />}
+            foot={`전월(${kpi.prevMonthLabel || ''}) 대비`}
+          />
+          <KpiCard
+            emoji="📦"
+            label="재고 부족"
+            value={num(low) + '건'}
+            accent={low > 0}
+            delta={low > 0
+              ? <Badge tone="red">발주 필요</Badge>
+              : <Badge tone="green">모두 정상</Badge>}
+            foot="안전재고 미달"
+          />
+        </div>
+      );
+    }
+
+    // 4-3. 날씨 + 손님수 예측
+    function FactorChip({ f }) {
+      const tone = f.effect === '+' ? 'green' : f.effect === '-' ? 'red' : 'gray';
+      const arrow = f.effect === '+' ? '↑' : f.effect === '-' ? '↓' : '·';
+      return (
+        <Badge tone={tone} className="max-w-full" >
+          <span aria-hidden="true">{arrow}</span>
+          <span className="truncate" title={f.detail || f.label}>{f.label}</span>
+        </Badge>
+      );
+    }
+
+    function WeatherPredictionCard({ data, loading, error, onRetry }) {
+      return (
+        <Card className="p-5 h-full flex flex-col fade-up">
+          <SectionTitle
+            emoji="🌦️"
+            title={`${(data && data.city) || '파주'} 날씨 · 손님 예측`}
+            desc={data && data.prediction ? `${data.prediction.date} (${data.prediction.dow}) 기준` : '실시간'}
+          />
+          {loading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          ) : error || !data || !data.prediction ? (
+            <ErrorBox msg={error || '날씨·예측 정보를 불러오지 못했어요.'} onRetry={onRetry} />
+          ) : (
+            (() => {
+              const w = data.weather || {};
+              const p = data.prediction;
+              const factors = p.factors || [];
+              return (
+                <div className="flex flex-col gap-4 flex-1">
+                  {/* 날씨 */}
+                  {w.available ? (
+                    <div className="flex items-center gap-3 bg-sage-50 rounded-xl p-3">
+                      <img
+                        src={`https://openweathermap.org/img/wn/${w.icon}@2x.png`}
+                        alt={w.desc || '날씨'}
+                        className="w-14 h-14 shrink-0"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-2xl font-bold text-sage-800 leading-none">{Math.round(w.temp)}°</p>
+                        <p className="text-sm text-sage-600 mt-1 truncate">{w.desc}</p>
+                      </div>
+                      <div className="ml-auto text-[11px] text-sage-500 space-y-0.5 text-right shrink-0">
+                        <p>체감 {Math.round(w.feelsLike)}°</p>
+                        <p>습도 {w.humidity}%</p>
+                        <p>바람 {w.windSpeed}m/s</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-xs flex gap-2 items-start">
+                      <span aria-hidden="true">⏳</span>
+                      <div>
+                        <p className="font-semibold">날씨 API 활성화 대기중</p>
+                        <p className="opacity-80 mt-0.5">
+                          실시간 날씨 없이 과거 데이터로 예측했어요.{w.error ? ` (${w.error})` : ''}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 예측 */}
+                  <div className="text-center">
+                    <p className="text-xs font-semibold text-sage-500">오늘 예상 방문객</p>
+                    <p className="text-4xl font-extrabold text-terracotta-500 mt-1 leading-none">
+                      {num(p.predicted)}<span className="text-lg text-terracotta-400 font-bold ml-0.5">명</span>
+                    </p>
+                    <p className="text-xs text-sage-500 mt-2">
+                      예상 범위 {num(p.low)}~{num(p.high)}명 · 요일 평균 {num(p.baseline)}명
+                      {w.available && p.weatherMultiplier != null && Number(p.weatherMultiplier) !== 1
+                        ? ` · 날씨 ×${p.weatherMultiplier}` : ''}
+                    </p>
+                  </div>
+
+                  {/* 근거 칩 */}
+                  {factors.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 justify-center">
+                      {factors.map((f, i) => <FactorChip key={i} f={f} />)}
+                    </div>
+                  )}
+
+                  {p.comment && (
+                    <p className="text-sm text-sage-600 bg-sage-50 rounded-xl p-3 mt-auto">💡 {p.comment}</p>
+                  )}
+                </div>
+              );
+            })()
+          )}
+        </Card>
+      );
+    }
+
+    // 4-4. 매출 추이 차트 (혼합: 막대 매출 + 라인 방문객, 이중 축)
+    function SalesTrendChart({ trend, loading }) {
+      const canvasRef = useRef(null);
+      const chartRef = useRef(null);
+
+      useEffect(() => {
+        if (loading || !trend || !trend.length || !window.Chart || !canvasRef.current) return;
+        if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
+
+        chartRef.current = new window.Chart(canvasRef.current, {
+          data: {
+            labels: trend.map((d) => mmdd(d.date)),
+            datasets: [
+              {
+                type: 'bar', label: '매출', yAxisID: 'y', order: 2,
+                data: trend.map((d) => d.revenue),
+                backgroundColor: 'rgba(90,128,100,0.72)', borderRadius: 4, maxBarThickness: 16,
+              },
+              {
+                type: 'line', label: '방문객', yAxisID: 'y1', order: 1,
+                data: trend.map((d) => d.customers),
+                borderColor: '#c25c39', backgroundColor: '#c25c39',
+                tension: 0.35, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4,
+              },
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: (c) => c.dataset.label === '매출'
+                    ? ' 매출 ' + won(c.parsed.y)
+                    : ' 방문객 ' + num(c.parsed.y) + '명',
+                },
+              },
+            },
+            scales: {
+              x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10, font: { size: 10 } } },
+              y: {
+                position: 'left', beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' },
+                title: { display: true, text: '매출(만원)', font: { size: 10 } },
+                ticks: { font: { size: 10 }, callback: (v) => (v >= 10000 ? (v / 10000).toLocaleString('ko-KR') + '만' : v) },
+              },
+              y1: {
+                position: 'right', beginAtZero: true, grid: { drawOnChartArea: false },
+                title: { display: true, text: '방문객(명)', font: { size: 10 } },
+                ticks: { font: { size: 10 }, callback: (v) => num(v) },
+              },
+            },
+          },
+        });
+
+        return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; } };
+      }, [trend, loading]);
+
+      return (
+        <Card className="p-5 fade-up">
+          <SectionTitle emoji="📈" title="매출 추이" desc="최근 30일 · 매출(막대) & 방문객(라인)" />
+          {loading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : !trend || !trend.length ? (
+            <Empty msg="표시할 매출 데이터가 없어요." emoji="📉" />
+          ) : (
+            <div className="relative h-64 sm:h-72"><canvas ref={canvasRef} /></div>
+          )}
+        </Card>
+      );
+    }
+
+    // 4-5. 인기 메뉴 (도넛 + 표)
+    function TopMenusPanel({ menus, categoryMix, loading }) {
+      const canvasRef = useRef(null);
+      const chartRef = useRef(null);
+
+      useEffect(() => {
+        if (loading || !menus || !menus.length || !window.Chart || !canvasRef.current) return;
+        if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
+
+        chartRef.current = new window.Chart(canvasRef.current, {
+          type: 'doughnut',
+          data: {
+            labels: menus.map((m) => m.name),
+            datasets: [{
+              data: menus.map((m) => m.qty),
+              backgroundColor: menus.map((_, i) => PIE[i % PIE.length]),
+              borderWidth: 2, borderColor: '#fff',
+            }],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false, cutout: '62%',
+            plugins: {
+              legend: { display: false },
+              tooltip: { callbacks: { label: (c) => ' ' + c.label + ' ' + num(c.parsed) + '개' } },
+            },
+          },
+        });
+
+        return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; } };
+      }, [menus, loading]);
+
+      return (
+        <Card className="p-5 fade-up">
+          <SectionTitle emoji="🥞" title="인기 메뉴 TOP 8" desc="이달 판매량 기준" />
+          {loading ? (
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Skeleton className="h-44 w-full" />
+              <div className="space-y-2">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-7 w-full" />)}</div>
+            </div>
+          ) : !menus || !menus.length ? (
+            <Empty msg="이달 판매된 메뉴가 없어요." emoji="🍽️" />
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-4 items-center">
+              <div className="relative h-44"><canvas ref={canvasRef} /></div>
+              <div className="overflow-x-auto nice-scroll">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[11px] text-sage-400 text-left">
+                      <th className="font-semibold pb-1">메뉴</th>
+                      <th className="font-semibold pb-1 text-right">판매</th>
+                      <th className="font-semibold pb-1 text-right">매출</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {menus.map((m, i) => (
+                      <tr key={m.name} className="border-t border-sage-50">
+                        <td className="py-1.5">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PIE[i % PIE.length] }} />
+                            <span className="font-medium text-sage-700 truncate">{m.name}</span>
+                          </span>
+                          <span className="block text-[10px] text-sage-400 ml-4">{m.category}</span>
+                        </td>
+                        <td className="py-1.5 text-right text-sage-600 whitespace-nowrap">{num(m.qty)}개</td>
+                        <td className="py-1.5 text-right text-sage-500 whitespace-nowrap">{num(m.revenue)}원</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {!loading && categoryMix && categoryMix.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-sage-50 flex flex-wrap gap-1.5">
+              <span className="text-[11px] text-sage-400 mr-1">카테고리별</span>
+              {categoryMix.map((c) => (
+                <Badge key={c.category} tone="sage">{c.category} {num(c.qty)}개</Badge>
+              ))}
+            </div>
+          )}
+        </Card>
+      );
+    }
+
+    // 4-6. 재고 현황 (부족 강조)
+    function InventoryRow({ it }) {
+      const low = it.status === '부족';
+      const ratio = Number(it.safety) > 0 ? Math.min(100, (Number(it.current) / Number(it.safety)) * 100) : 100;
+      return (
+        <div className={`flex items-center gap-3 p-2.5 rounded-xl ${low ? 'bg-red-50 border border-red-100' : 'bg-sage-50/60'}`}>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={`text-sm font-semibold truncate ${low ? 'text-red-700' : 'text-sage-700'}`}>{it.name}</span>
+              <Badge tone={low ? 'red' : 'gray'}>{it.status}</Badge>
+            </div>
+            <p className="text-[11px] text-sage-500 mt-0.5">
+              {it.category} · 현재 {num(it.current)}{it.unit} / 안전 {num(it.safety)}{it.unit}
+            </p>
+            <div className="mt-1.5 h-1.5 bg-sage-100 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${low ? 'bg-red-400' : 'bg-sage-400'}`} style={{ width: ratio + '%' }} />
+            </div>
+          </div>
+          {low && Number(it.shortage) > 0 && (
+            <div className="text-right shrink-0">
+              <p className="text-[11px] text-red-500 font-semibold">부족</p>
+              <p className="text-sm text-red-600 font-bold whitespace-nowrap">{num(it.shortage)}{it.unit}</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function InventoryPanel({ inventory, loading }) {
+      const items = (inventory && inventory.items) || [];
+      const lowCount = inventory ? inventory.lowCount : 0;
+      const total = inventory ? inventory.total : 0;
+      return (
+        <Card className="p-5 fade-up">
+          <SectionTitle
+            emoji="📦"
+            title="재고 현황"
+            desc="부족 품목 우선 표시"
+            right={!loading && inventory ? (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Badge tone="gray">총 {num(total)}개</Badge>
+                <Badge tone={lowCount > 0 ? 'red' : 'green'}>부족 {num(lowCount)}건</Badge>
+              </div>
+            ) : null}
+          />
+          {loading ? (
+            <div className="space-y-2">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
+          ) : !items.length ? (
+            <Empty msg="재고 데이터가 없어요." emoji="📭" />
+          ) : (
+            <div className="space-y-2 max-h-[26rem] overflow-y-auto nice-scroll pr-1">
+              {items.map((it) => <InventoryRow key={it.id} it={it} />)}
+            </div>
+          )}
+        </Card>
+      );
+    }
+
+    // 4-7. 할일 · 발주 메모 (노션 연동)
+    function TodoItem({ it, onToggle, onDelete }) {
+      return (
+        <li className="flex items-center gap-3 py-2.5 border-b border-sage-50 last:border-0">
+          <button type="button" onClick={() => onToggle(it)} className="shrink-0" aria-label={it.done ? '완료 취소' : '완료 처리'}>
+            {it.done ? <CheckFilled /> : <CheckEmpty />}
+          </button>
+          <p className={`flex-1 min-w-0 text-sm ${it.done ? 'line-through text-sage-400' : 'text-sage-700'}`}>{it.content}</p>
+          <Badge tone={it.category === '발주' ? 'terracotta' : 'sage'}>{it.category}</Badge>
+          <button
+            type="button" onClick={() => onDelete(it)}
+            className="shrink-0 text-sage-300 hover:text-red-500 transition p-1" aria-label="삭제"
+          >
+            <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </li>
+      );
+    }
+
+    function TodosPanel({ todos, loading, error, onAdd, onToggle, onDelete, onRetry }) {
+      const [cat, setCat] = useState('할일');
+      const [content, setContent] = useState('');
+      const [submitting, setSubmitting] = useState(false);
+      const [formErr, setFormErr] = useState('');
+
+      const items = (todos && todos.items) || [];
+      const notionUrl = todos && todos.notionUrl;
+      const remaining = items.filter((t) => !t.done).length;
+
+      async function submit(e) {
+        e.preventDefault();
+        const c = content.trim();
+        if (!c) { setFormErr('내용을 입력해주세요.'); return; }
+        setSubmitting(true); setFormErr('');
+        try {
+          await onAdd(cat, c);
+          setContent('');
+        } catch (ex) {
+          setFormErr(ex.message);
+        } finally {
+          setSubmitting(false);
+        }
+      }
+
+      return (
+        <Card className="p-5 fade-up">
+          <SectionTitle
+            emoji="📝"
+            title="할일 · 발주 메모"
+            desc={loading ? '' : `미완료 ${remaining}건`}
+            right={notionUrl ? (
+              <a href={notionUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                <Button variant="secondary" size="sm">🔗 노션에서 열기</Button>
+              </a>
+            ) : null}
+          />
+
+          {/* 추가 폼 */}
+          <form onSubmit={submit} className="flex flex-col sm:flex-row gap-2 mb-2">
+            <Segmented
+              value={cat} onChange={setCat}
+              options={[{ value: '할일', label: '할일' }, { value: '발주', label: '발주' }]}
+            />
+            <input
+              value={content}
+              onChange={(e) => { setContent(e.target.value); if (formErr) setFormErr(''); }}
+              placeholder={cat === '발주' ? '예) 오트밀크 10L 발주' : '예) 놀이존 매트 소독'}
+              aria-label="메모 내용"
+              className="flex-1 rounded-xl border border-sage-200 px-3.5 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-sage-300 focus:border-sage-400"
+            />
+            <Button type="submit" disabled={submitting} className="shrink-0">
+              {submitting ? <Spinner className="w-4 h-4" /> : '추가'}
+            </Button>
+          </form>
+          {formErr && <p className="text-xs text-red-500 mb-2">{formErr}</p>}
+
+          {/* 목록 */}
+          {loading ? (
+            <div className="space-y-2 mt-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
+          ) : error ? (
+            <ErrorBox msg={error} onRetry={onRetry} />
+          ) : !items.length ? (
+            <Empty msg="등록된 할일·발주가 없어요. 위에서 추가해보세요." emoji="🗒️" />
+          ) : (
+            <ul className="mt-1">
+              {items.map((it) => (
+                <TodoItem key={it.id} it={it} onToggle={onToggle} onDelete={onDelete} />
+              ))}
+            </ul>
+          )}
+        </Card>
+      );
+    }
+
+    // 4-8. 최근 발주/입고 (summary.recentOrders)
+    function RecentOrdersPanel({ orders, loading }) {
+      return (
+        <Card className="p-5 fade-up">
+          <SectionTitle emoji="🚚" title="최근 발주 · 입고" desc="최근 8건" />
+          {loading ? (
+            <div className="space-y-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+          ) : !orders || !orders.length ? (
+            <Empty msg="발주 내역이 없어요." emoji="📦" />
+          ) : (
+            <ul className="space-y-2">
+              {orders.map((o, i) => {
+                const done = o.status === '입고완료';
+                return (
+                  <li key={i} className="flex items-center gap-3 p-2.5 rounded-xl bg-sage-50/60">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-sage-700 truncate">{o.itemName}</span>
+                        <Badge tone={done ? 'green' : 'amber'}>{o.status}</Badge>
+                      </div>
+                      <p className="text-[11px] text-sage-500 mt-0.5">
+                        {o.orderDate} · {num(o.qty)}{o.unit}
+                        {done && o.deliveredDate ? ` · 입고 ${o.deliveredDate}` : ''}
+                      </p>
+                    </div>
+                    <span className="text-sm text-sage-600 font-medium whitespace-nowrap shrink-0">{won(o.totalCost)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 5. 상단바
+    // ========================================
+    function TopBar({ config, user, onLogout, onRefreshAll, refreshingAll }) {
+      return (
+        <header className="sticky top-0 z-20 bg-cream/85 backdrop-blur border-b border-sage-100">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xl" aria-hidden="true">☕</span>
+              <div className="min-w-0">
+                <h1 className="font-extrabold text-sage-800 leading-tight truncate">놀담 대시보드</h1>
+                <p className="text-[11px] text-sage-500 truncate">
+                  📍 {(config && config.location) || '파주'} · {config && config.today ? krDate(config.today) : '—'}
+                  {config && config.dataThrough && (
+                    <span className="hidden sm:inline"> · 데이터 {config.dataThrough}까지</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="ml-auto flex items-center gap-2 shrink-0">
+              <Button variant="ghost" size="sm" onClick={onRefreshAll} disabled={refreshingAll} aria-label="전체 새로고침">
+                {refreshingAll ? <Spinner className="w-4 h-4" /> : <span aria-hidden="true">🔄</span>}
+                <span className="hidden md:inline">새로고침</span>
+              </Button>
+              <span className="hidden sm:inline text-sm text-sage-600">👋 {(user && user.name) || '사장님'}님</span>
+              <Button variant="secondary" size="sm" onClick={onLogout}>로그아웃</Button>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    // ========================================
+    // 6. 부팅 / 인증 화면
+    // ========================================
+    function BootScreen() {
+      return (
+        <div className="min-h-screen grid place-items-center bg-gradient-to-b from-cream to-sage-50">
+          <div className="text-center">
+            <div className="text-5xl mb-3 animate-bounce">☕</div>
+            <Spinner className="w-6 h-6 text-sage-500 mx-auto" />
+            <p className="mt-3 text-sm text-sage-500">놀담 대시보드를 여는 중…</p>
+          </div>
+        </div>
+      );
+    }
+
+    function AuthScreen({ onAuthed }) {
+      const [mode, setMode] = useState('login'); // login | signup
+      const [email, setEmail] = useState('');
+      const [pw, setPw] = useState('');
+      const [pw2, setPw2] = useState('');
+      const [errors, setErrors] = useState({});
+      const [formError, setFormError] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      useEffect(() => {
+        setErrors({}); setFormError(''); setPw2('');
+        const el = document.getElementById('auth-email');
+        if (el) el.focus();
+      }, [mode]);
+
+      function validate() {
+        const e = {};
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = '올바른 이메일을 입력해주세요.';
+        if (pw.length < 6) e.pw = '비밀번호는 6자 이상이어야 해요.';
+        if (mode === 'signup' && pw !== pw2) e.pw2 = '비밀번호가 일치하지 않아요.';
+        return e;
+      }
+
+      async function submit(ev) {
+        ev.preventDefault();
+        setFormError('');
+        const e = validate();
+        setErrors(e);
+        if (Object.keys(e).length) return;
+        setLoading(true);
+        try {
+          const path = mode === 'login' ? '/auth/login' : '/auth/signup';
+          const data = await api(path, { method: 'POST', body: JSON.stringify({ email, password: pw }) });
+          tokenStore.set(data.token);
+          onAuthed(data.user);
+        } catch (ex) {
+          setFormError(ex.message);
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      return (
+        <div className="min-h-screen grid place-items-center bg-gradient-to-b from-cream to-sage-50 px-4 py-10">
+          <div className="w-full max-w-sm fade-up">
+            <div className="text-center mb-6">
+              <div className="text-5xl">☕</div>
+              <h1 className="mt-2 text-xl font-extrabold text-sage-800">놀담 대시보드</h1>
+              <p className="text-sm text-sage-500 mt-1">아이는 놀고, 어른은 쉬고 · 파주 키즈 브런치</p>
+            </div>
+            <Card className="p-6">
+              <Segmented
+                full value={mode} onChange={setMode}
+                options={[{ value: 'login', label: '로그인' }, { value: 'signup', label: '회원가입' }]}
+              />
+              <form onSubmit={submit} className="mt-5 space-y-4">
+                <Field
+                  id="auth-email" label="이메일" type="email" inputMode="email" autoComplete="email"
+                  value={email} onChange={(e) => setEmail(e.target.value)}
+                  placeholder="owner@noldam.cafe" error={errors.email}
+                />
+                <Field
+                  id="auth-pw" label="비밀번호" type="password"
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  value={pw} onChange={(e) => setPw(e.target.value)}
+                  placeholder="6자 이상" error={errors.pw}
+                />
+                {mode === 'signup' && (
+                  <Field
+                    id="auth-pw2" label="비밀번호 확인" type="password" autoComplete="new-password"
+                    value={pw2} onChange={(e) => setPw2(e.target.value)}
+                    placeholder="비밀번호 재입력" error={errors.pw2}
+                  />
+                )}
+                {formError && (
+                  <div role="alert" className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                    {formError}
+                  </div>
+                )}
+                <Button type="submit" size="lg" className="w-full" disabled={loading}>
+                  {loading ? <><Spinner className="w-4 h-4" /> 처리중…</> : (mode === 'login' ? '로그인' : '회원가입')}
+                </Button>
+              </form>
+              <p className="mt-4 text-center text-xs text-sage-400">
+                {mode === 'login' ? '처음이신가요? 회원가입으로 시작하세요.' : '이미 계정이 있으신가요? 로그인하세요.'}
+              </p>
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 7. 대시보드 (데이터 오케스트레이션)
+    // ========================================
+    function sortTodos(items) {
+      return [...items].sort((a, b) =>
+        a.done === b.done
+          ? String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+          : (a.done ? 1 : -1)
+      );
+    }
+
+    function Dashboard({ user, onLogout }) {
+      // 핵심 데이터 (config + summary + weather 를 함께 로드)
+      const [config, setConfig] = useState(null);
+      const [summary, setSummary] = useState(null);
+      const [weather, setWeather] = useState(null);
+      const [coreLoading, setCoreLoading] = useState(true);
+      const [coreError, setCoreError] = useState(null);
+
+      // 브리핑 (독립 로딩 + 새로고침)
+      const [briefing, setBriefing] = useState(null);
+      const [briefingLoading, setBriefingLoading] = useState(true);
+      const [briefingRefreshing, setBriefingRefreshing] = useState(false);
+      const [briefingError, setBriefingError] = useState(null);
+
+      // 할일/발주 (독립 로딩 + 뮤테이션)
+      const [todos, setTodos] = useState(null);
+      const [todosLoading, setTodosLoading] = useState(true);
+      const [todosError, setTodosError] = useState(null);
+
+      const loadCore = useCallback(async () => {
+        setCoreLoading(true); setCoreError(null);
+        try {
+          const [cfg, sum, wx] = await Promise.all([
+            api('/cafe/config'), api('/cafe/summary'), api('/cafe/weather'),
+          ]);
+          setConfig(cfg); setSummary(sum); setWeather(wx);
+        } catch (e) {
+          if (e.name !== 'AuthError') setCoreError(e.message);
+        } finally {
+          setCoreLoading(false);
+        }
+      }, []);
+
+      const loadBriefing = useCallback(async (refresh) => {
+        if (refresh) setBriefingRefreshing(true); else setBriefingLoading(true);
+        setBriefingError(null);
+        try {
+          const d = refresh
+            ? await api('/cafe/briefing/refresh', { method: 'POST' })
+            : await api('/cafe/briefing');
+          setBriefing(d);
+        } catch (e) {
+          if (e.name !== 'AuthError') setBriefingError(e.message);
+        } finally {
+          if (refresh) setBriefingRefreshing(false); else setBriefingLoading(false);
+        }
+      }, []);
+
+      const loadTodos = useCallback(async () => {
+        setTodosLoading(true); setTodosError(null);
+        try {
+          const d = await api('/cafe/todos');
+          setTodos({ notionUrl: d.notionUrl, items: sortTodos(d.items || []) });
+        } catch (e) {
+          if (e.name !== 'AuthError') setTodosError(e.message);
+        } finally {
+          setTodosLoading(false);
+        }
+      }, []);
+
+      useEffect(() => { loadCore(); loadBriefing(false); loadTodos(); }, [loadCore, loadBriefing, loadTodos]);
+
+      // --- todo 뮤테이션 ---
+      const addTodo = useCallback(async (category, content) => {
+        try {
+          const d = await api('/cafe/todos', { method: 'POST', body: JSON.stringify({ category, content }) });
+          setTodos((t) => ({ notionUrl: t ? t.notionUrl : null, items: sortTodos([...(t ? t.items : []), d.item]) }));
+        } catch (e) {
+          if (e.name === 'AuthError') return;
+          throw e; // 폼에서 표시
+        }
+      }, []);
+
+      const toggleTodo = useCallback(async (it) => {
+        setTodos((t) => ({ ...t, items: sortTodos(t.items.map((x) => x.id === it.id ? { ...x, done: !x.done } : x)) }));
+        try {
+          await api('/cafe/todos/' + it.id, { method: 'PATCH', body: JSON.stringify({ done: !it.done }) });
+        } catch (e) {
+          if (e.name !== 'AuthError') { setTodosError(e.message); loadTodos(); } // 실패 시 서버 기준 재동기화
+        }
+      }, [loadTodos]);
+
+      const deleteTodo = useCallback(async (it) => {
+        setTodos((t) => ({ ...t, items: t.items.filter((x) => x.id !== it.id) }));
+        try {
+          await api('/cafe/todos/' + it.id, { method: 'DELETE' });
+        } catch (e) {
+          if (e.name !== 'AuthError') { setTodosError(e.message); loadTodos(); }
+        }
+      }, [loadTodos]);
+
+      const refreshAll = useCallback(() => {
+        loadCore(); loadBriefing(false); loadTodos();
+      }, [loadCore, loadBriefing, loadTodos]);
+
+      return (
+        <div className="min-h-screen bg-cream text-sage-800">
+          <TopBar
+            config={config} user={user} onLogout={onLogout}
+            onRefreshAll={refreshAll} refreshingAll={coreLoading}
+          />
+          <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+            {coreError && <ErrorBanner msg={coreError} onRetry={loadCore} />}
+
+            {/* 1. AI 브리핑 */}
+            <BriefingHero
+              data={briefing} loading={briefingLoading} refreshing={briefingRefreshing}
+              error={briefingError} onRefresh={() => loadBriefing(true)}
+            />
+
+            {/* 2. KPI */}
+            <KpiCards kpi={summary && summary.kpi} loading={coreLoading} />
+
+            {/* 3. 날씨/예측 + 매출추이 */}
+            <div className="grid lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-1">
+                <WeatherPredictionCard data={weather} loading={coreLoading} error={coreError} onRetry={loadCore} />
+              </div>
+              <div className="lg:col-span-2">
+                <SalesTrendChart trend={summary && summary.salesTrend} loading={coreLoading} />
+              </div>
+            </div>
+
+            {/* 4. 인기메뉴 + 재고 */}
+            <div className="grid lg:grid-cols-2 gap-6">
+              <TopMenusPanel
+                menus={summary && summary.topMenus}
+                categoryMix={summary && summary.categoryMix}
+                loading={coreLoading}
+              />
+              <InventoryPanel inventory={summary && summary.inventory} loading={coreLoading} />
+            </div>
+
+            {/* 5. 할일/발주 + 최근발주 */}
+            <div className="grid lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
+                <TodosPanel
+                  todos={todos} loading={todosLoading} error={todosError}
+                  onAdd={addTodo} onToggle={toggleTodo} onDelete={deleteTodo} onRetry={loadTodos}
+                />
+              </div>
+              <div className="lg:col-span-1">
+                <RecentOrdersPanel orders={summary && summary.recentOrders} loading={coreLoading} />
+              </div>
+            </div>
+
+            <footer className="pt-2 pb-6 text-center text-xs text-sage-400">
+              ☕ 놀담 · 아이는 놀고, 어른은 쉬고
+              {config && config.dataThrough ? ` · 데이터 기준 ${config.dataThrough}` : ''}
+            </footer>
+          </main>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 8. App — 3-상태 머신(booting → auth → app)
+    // ========================================
+    function App() {
+      const [status, setStatus] = useState('booting'); // booting | auth | app
+      const [user, setUser] = useState(null);
+
+      // 401 전역 바운스 핸들러 주입
+      useEffect(() => {
+        setUnauthorizedHandler(() => { setUser(null); setStatus('auth'); });
+      }, []);
+
+      // 부팅: 토큰 검증
+      useEffect(() => {
+        let alive = true;
+        (async () => {
+          if (!tokenStore.get()) { setStatus('auth'); return; }
+          try {
+            const d = await api('/auth/me');
+            if (!alive) return;
+            setUser(d.user); setStatus('app');
+          } catch (e) {
+            if (!alive) return;
+            tokenStore.clear();
+            setStatus('auth'); // AuthError 는 이미 바운스됨; 그 외에도 인증화면으로
+          }
+        })();
+        return () => { alive = false; };
+      }, []);
+
+      if (status === 'booting') return <BootScreen />;
+      if (status === 'auth') return <AuthScreen onAuthed={(u) => { setUser(u); setStatus('app'); }} />;
+      return <Dashboard user={user} onLogout={() => { tokenStore.clear(); setUser(null); setStatus('auth'); }} />;
+    }
+
+    // ========================================
+    // 9. 렌더
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

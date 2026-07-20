@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🍼 우리 아이 마켓</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 UMD (개발 빌드) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <!-- ⚠️ Babel 은 반드시 7.x 로 고정한다. 미고정(@babel/standalone) 시 최신 8.x 로
+       올라가 type="text/babel" 인라인 JSX 변환이 통째로 깨져 화면이 백지가 된다. -->
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <!-- TossPayments 결제위젯 v2 SDK — 전역 TossPayments 를 노출한다(시크릿키 아님/공개). -->
+  <script src="https://js.tosspayments.com/v2/standard"></script>
+  <style>
+    /* Tailwind으로 표현하기 어려운 진입/등장 애니메이션만 별도 정의 */
+    @keyframes itemIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .item-in { animation: itemIn 0.18s ease-out; }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .toast-in { animation: toastIn 0.22s ease-out; }
+
+    @keyframes drawerIn {
+      from { transform: translateX(100%); }
+      to   { transform: translateX(0); }
+    }
+    .drawer-in { animation: drawerIn 0.24s cubic-bezier(0.16, 1, 0.3, 1); }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .fade-in { animation: fadeIn 0.2s ease-out; }
+  </style>
+</head>
+<body class="bg-amber-50">
+  <div id="root"></div>
+
+  <!-- React 앱 본체. Babel 이 브라우저에서 JSX 를 변환합니다(단일 파일). -->
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+    // ============================================================
+    // 🔐 Auth token (localStorage) — 쇼핑몰 전용 키
+    // ============================================================
+    const TOKEN_KEY = 'shop_token';
+
+    const tokenStore = {
+      get: () => {
+        try { return localStorage.getItem(TOKEN_KEY) || null; }
+        catch (_e) { return null; }
+      },
+      set: (token) => {
+        try { localStorage.setItem(TOKEN_KEY, token); } catch (_e) { /* quota 등 무시 */ }
+      },
+      clear: () => {
+        try { localStorage.removeItem(TOKEN_KEY); } catch (_e) { /* 무시 */ }
+      },
+    };
+
+    // ============================================================
+    // 📡 API helper — 모든 /api 호출에 Bearer 자동 첨부, 401 → 인증화면 복귀
+    // ============================================================
+    let unauthorizedHandler = () => {};
+    function setUnauthorizedHandler(fn) { unauthorizedHandler = fn; }
+
+    class AuthError extends Error {
+      constructor(message) { super(message); this.name = 'AuthError'; }
+    }
+
+    async function api(path, options = {}) {
+      const token = tokenStore.get();
+      const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      let res;
+      try {
+        res = await fetch(path, { ...options, headers });
+      } catch (_networkErr) {
+        throw new Error('서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
+      }
+
+      let body = null;
+      try { body = await res.json(); } catch (_e) { /* 비 JSON 응답 */ }
+
+      if (res.status === 401) {
+        tokenStore.clear();
+        unauthorizedHandler();
+        const msg = (body && body.message) || '로그인이 필요합니다.';
+        throw new AuthError(msg);
+      }
+
+      if (!res.ok || !body || body.success === false) {
+        const msg = (body && body.message) || '요청을 처리하지 못했습니다.';
+        throw new Error(msg);
+      }
+      return body.data;
+    }
+
+    // 이메일 형식 검사(가벼운 클라 검증; 진짜 검증은 서버)
+    const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+    // 원화 표기: ₩8,900
+    const won = (n) => `₩${Number(n || 0).toLocaleString('ko-KR')}`;
+
+    // 날짜 표기: 2026. 7. 7. 21:03
+    const fmtDate = (s) => {
+      if (!s) return '';
+      try { return new Date(s).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }); }
+      catch (_e) { return s; }
+    };
+
+    // 토스 결제 리다이렉트 파라미터 파싱 — location.search + hash 안 query 를 모두 병합한다.
+    // (토스 SDK 는 paymentKey/orderId/amount 를 search 에, paymentType 등을 hash 안 query 에 붙일 수 있음)
+    function parsePaymentParams() {
+      const params = new URLSearchParams();
+      new URLSearchParams(window.location.search).forEach((v, k) => params.set(k, v));
+      const hash = window.location.hash || '';
+      const qi = hash.indexOf('?');
+      if (qi !== -1) new URLSearchParams(hash.slice(qi + 1)).forEach((v, k) => params.set(k, v));
+      return params;
+    }
+
+    // ImageKit 업로드 — 서버에서 업로드 인증을 받아 파일을 ImageKit 에 직접 올린다. 반환 { url, ... }.
+    // 시크릿키는 서버에만 있고, 클라이언트는 서명된 token/expire/signature 로만 업로드한다.
+    async function uploadAvatarToImageKit(file) {
+      const auth = await api('/api/imagekit/auth'); // { token, expire, signature, publicKey }
+      const form = new FormData();
+      form.append('file', file);
+      form.append('fileName', file.name || 'avatar.jpg');
+      form.append('publicKey', auth.publicKey);
+      form.append('signature', auth.signature);
+      form.append('expire', String(auth.expire));
+      form.append('token', auth.token);
+      form.append('useUniqueFileName', 'true');
+      form.append('folder', '/shop-avatars');
+      let res;
+      try {
+        res = await fetch('https://upload.imagekit.io/api/v1/files/upload', { method: 'POST', body: form });
+      } catch (_e) {
+        throw new Error('이미지 업로드 서버에 연결할 수 없어요.');
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data && data.message) || '이미지 업로드에 실패했어요.');
+      return data; // { url, thumbnailUrl, fileId, ... }
+    }
+
+    // 카테고리별 뱃지 색
+    const CATEGORY_STYLE = {
+      '이유식 재료': 'bg-emerald-100 text-emerald-700',
+      '간식': 'bg-amber-100 text-amber-700',
+      '물품': 'bg-sky-100 text-sky-700',
+    };
+    const categoryStyle = (c) => CATEGORY_STYLE[c] || 'bg-slate-100 text-slate-600';
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', loading = false, className = '', children, disabled, ...props }) {
+      const base = 'inline-flex items-center justify-center font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed';
+      const variants = {
+        primary: 'bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-300',
+        secondary: 'bg-slate-200 text-slate-700 hover:bg-slate-300 focus:ring-slate-400',
+        danger: 'bg-red-50 text-red-600 hover:bg-red-100 focus:ring-red-300',
+        ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 focus:ring-slate-300',
+      };
+      const sizes = {
+        sm: 'text-sm px-3 py-1.5',
+        md: 'text-sm px-4 py-2.5',
+      };
+      return (
+        <button
+          className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
+          disabled={disabled || loading}
+          {...props}
+        >
+          {loading && (
+            <svg className="-ml-1 mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+          )}
+          {children}
+        </button>
+      );
+    }
+
+    const Input = React.forwardRef(function Input({ className = '', invalid = false, ...props }, ref) {
+      const border = invalid
+        ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
+        : 'border-slate-300 focus:border-rose-400 focus:ring-rose-200';
+      return (
+        <input
+          ref={ref}
+          className={`w-full rounded-lg border bg-white px-4 py-2.5 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 ${border} ${className}`}
+          {...props}
+        />
+      );
+    });
+
+    function Field({ label, htmlFor, error, children }) {
+      return (
+        <div>
+          <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-slate-700">
+            {label}
+          </label>
+          {children}
+          {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return (
+        <div className={`rounded-2xl bg-white shadow-xl shadow-slate-200/60 ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Avatar({ name, src, size = 'sm' }) {
+      const dim = size === 'xl' ? 'h-20 w-20 text-2xl' : size === 'lg' ? 'h-9 w-9 text-sm' : 'h-7 w-7 text-xs';
+      if (src) {
+        return (
+          <img
+            src={src}
+            alt={name || '프로필'}
+            className={`flex-shrink-0 rounded-full bg-rose-100 object-cover ${dim}`}
+          />
+        );
+      }
+      return (
+        <span className={`flex flex-shrink-0 items-center justify-center rounded-full bg-rose-100 font-bold uppercase text-rose-600 ${dim}`}>
+          {(name || '?').charAt(0)}
+        </span>
+      );
+    }
+
+    // 비차단 에러 토스트(화면 하단 중앙)
+    function ErrorToast({ message, onClose }) {
+      if (!message) return null;
+      return (
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4">
+          <div
+            role="alert"
+            className="toast-in pointer-events-auto flex max-w-sm items-start gap-3 rounded-xl border border-red-200 bg-white px-4 py-3 shadow-lg shadow-red-200/40"
+          >
+            <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fillRule="evenodd" d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-8-4a1 1 0 00-1 1v3a1 1 0 102 0V7a1 1 0 00-1-1zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+            </svg>
+            <p className="flex-1 text-sm text-slate-700">{message}</p>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="알림 닫기"
+              className="flex-shrink-0 rounded-md p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    function LoadingBlock({ label = '불러오는 중...' }) {
+      return (
+        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 px-4 py-12 text-center">
+          <svg className="mb-3 h-8 w-8 animate-spin text-rose-400" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+          </svg>
+          <p className="text-sm text-slate-400">{label}</p>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 Auth Screen (로그인 / 회원가입)
+    // ========================================
+    function AuthScreen({ onAuthed, onBack }) {
+      const [mode, setMode] = useState('login'); // 'login' | 'signup'
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [confirm, setConfirm] = useState('');
+      const [errors, setErrors] = useState({});
+      const [formError, setFormError] = useState('');
+      const [submitting, setSubmitting] = useState(false);
+      const emailRef = useRef(null);
+
+      const isSignup = mode === 'signup';
+
+      const switchMode = (next) => {
+        setMode(next);
+        setErrors({});
+        setFormError('');
+        setConfirm('');
+      };
+
+      useEffect(() => {
+        emailRef.current && emailRef.current.focus();
+      }, [mode]);
+
+      const validate = () => {
+        const next = {};
+        if (!email.trim()) next.email = '이메일을 입력해 주세요.';
+        else if (!isValidEmail(email.trim())) next.email = '올바른 이메일 형식이 아닙니다.';
+
+        if (!password) next.password = '비밀번호를 입력해 주세요.';
+        else if (password.length < 6) next.password = '비밀번호는 6자 이상이어야 합니다.';
+
+        if (isSignup) {
+          if (!confirm) next.confirm = '비밀번호를 한 번 더 입력해 주세요.';
+          else if (password !== confirm) next.confirm = '비밀번호가 일치하지 않습니다.';
+        }
+        return next;
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setFormError('');
+        const nextErrors = validate();
+        setErrors(nextErrors);
+        if (Object.keys(nextErrors).length > 0) return;
+
+        setSubmitting(true);
+        try {
+          const path = isSignup ? '/api/auth/signup' : '/api/auth/login';
+          const data = await api(path, {
+            method: 'POST',
+            body: JSON.stringify({ email: email.trim(), password }),
+          });
+          tokenStore.set(data.token);
+          onAuthed(data.user);
+        } catch (err) {
+          setFormError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-amber-50 to-rose-100 px-4 py-10">
+          <div className="w-full max-w-sm">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700 focus:outline-none"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                상품 목록으로 돌아가기
+              </button>
+            )}
+            <header className="mb-6 text-center">
+              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-3xl shadow-lg shadow-rose-200/60">
+                🍼
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-800">우리 아이 마켓</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                {isSignup ? '계정을 만들고 우리 아이 장보기를 시작하세요.' : '로그인하면 장바구니에 담아 주문을 준비할 수 있어요.'}
+              </p>
+            </header>
+
+            <Card className="p-6 sm:p-7">
+              <div className="mb-5 flex rounded-xl bg-slate-100 p-1" role="tablist" aria-label="인증 모드">
+                {[
+                  { key: 'login', label: '로그인' },
+                  { key: 'signup', label: '회원가입' },
+                ].map((t) => {
+                  const active = mode === t.key;
+                  return (
+                    <button
+                      key={t.key}
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => switchMode(t.key)}
+                      className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-rose-300 ${
+                        active ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+                <Field label="이메일" htmlFor="auth-email" error={errors.email}>
+                  <Input
+                    id="auth-email"
+                    ref={emailRef}
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    invalid={!!errors.email}
+                    disabled={submitting}
+                  />
+                </Field>
+
+                <Field label="비밀번호" htmlFor="auth-password" error={errors.password}>
+                  <Input
+                    id="auth-password"
+                    type="password"
+                    autoComplete={isSignup ? 'new-password' : 'current-password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="6자 이상"
+                    invalid={!!errors.password}
+                    disabled={submitting}
+                  />
+                </Field>
+
+                {isSignup && (
+                  <Field label="비밀번호 확인" htmlFor="auth-confirm" error={errors.confirm}>
+                    <Input
+                      id="auth-confirm"
+                      type="password"
+                      autoComplete="new-password"
+                      value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      placeholder="비밀번호를 한 번 더 입력"
+                      invalid={!!errors.confirm}
+                      disabled={submitting}
+                    />
+                  </Field>
+                )}
+
+                {formError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                    {formError}
+                  </div>
+                )}
+
+                <Button type="submit" loading={submitting} className="w-full" size="md">
+                  {isSignup ? '회원가입' : '로그인'}
+                </Button>
+              </form>
+
+              <p className="mt-5 text-center text-sm text-slate-500">
+                {isSignup ? '이미 계정이 있으신가요? ' : '아직 계정이 없으신가요? '}
+                <button
+                  type="button"
+                  onClick={() => switchMode(isSignup ? 'login' : 'signup')}
+                  className="font-semibold text-rose-600 hover:text-rose-700 hover:underline focus:outline-none"
+                >
+                  {isSignup ? '로그인' : '회원가입'}
+                </button>
+              </p>
+            </Card>
+
+            <p className="mt-6 text-center text-xs text-slate-400">
+              비밀번호는 안전하게 암호화되어 저장됩니다.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // 상품 이미지(Unsplash). 로딩 실패하거나 URL 이 없으면 이모지 박스로 폴백.
+    function ProductImage({ src, emoji, alt = '', className = '', emojiClass = 'text-5xl' }) {
+      const [failed, setFailed] = useState(false);
+      if (!src || failed) {
+        return (
+          <div className={`flex items-center justify-center bg-gradient-to-b from-amber-50 to-rose-50 ${emojiClass} ${className}`} aria-hidden="true">
+            {emoji}
+          </div>
+        );
+      }
+      return (
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className={`bg-amber-50 object-cover ${className}`}
+        />
+      );
+    }
+
+    // ========================================
+    // 🛍️ 상품 카드 (장바구니 담기)
+    // ========================================
+    function ProductCard({ product, onAdd, adding, justAdded }) {
+      return (
+        <li className="item-in flex flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition-shadow hover:shadow-md">
+          <ProductImage
+            src={product.imageUrl}
+            emoji={product.emoji}
+            alt={product.name}
+            className="h-28 w-full"
+            emojiClass="text-5xl"
+          />
+          <div className="flex flex-1 flex-col p-4">
+            <span className={`mb-2 inline-flex w-fit rounded-full px-2 py-0.5 text-[11px] font-medium ${categoryStyle(product.category)}`}>
+              {product.category}
+            </span>
+            <h3 className="text-[15px] font-semibold leading-snug text-slate-800">{product.name}</h3>
+            <p className="mt-1 line-clamp-2 flex-1 text-xs leading-relaxed text-slate-400">{product.description}</p>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className="text-lg font-bold text-slate-900">{won(product.price)}</span>
+              <Button
+                size="sm"
+                variant={justAdded ? 'secondary' : 'primary'}
+                loading={adding}
+                onClick={() => onAdd(product)}
+                className="flex-shrink-0"
+              >
+                {justAdded ? '담음 ✓' : '담기'}
+              </Button>
+            </div>
+          </div>
+        </li>
+      );
+    }
+
+    // ========================================
+    // 🧺 장바구니 한 줄 (수량 스테퍼 / 삭제)
+    // ========================================
+    function CartLine({ item, busy, onQty, onRemove }) {
+      const atMin = item.quantity <= 1;
+      return (
+        <li className="item-in flex gap-3 py-3">
+          <ProductImage
+            src={item.imageUrl}
+            emoji={item.emoji}
+            alt={item.name}
+            className="h-14 w-14 flex-shrink-0 rounded-xl"
+            emojiClass="text-2xl"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h4 className="truncate text-sm font-semibold text-slate-800">{item.name}</h4>
+                <p className="mt-0.5 text-xs text-slate-400">{won(item.price)} / 개</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemove(item.productId)}
+                disabled={busy}
+                aria-label={`${item.name} 삭제`}
+                className="flex-shrink-0 rounded-md p-1 text-slate-300 hover:bg-red-50 hover:text-red-500 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:opacity-40"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-2 flex items-center justify-between gap-2">
+              {/* 수량 스테퍼 */}
+              <div className="inline-flex items-center rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => onQty(item.productId, item.quantity - 1)}
+                  disabled={busy || atMin}
+                  aria-label="수량 줄이기"
+                  className="flex h-8 w-8 items-center justify-center rounded-l-lg text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-rose-200 disabled:opacity-40"
+                >
+                  −
+                </button>
+                <span className="min-w-[2rem] text-center text-sm font-semibold text-slate-800" aria-live="polite">
+                  {item.quantity}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onQty(item.productId, item.quantity + 1)}
+                  disabled={busy || item.quantity >= 99}
+                  aria-label="수량 늘리기"
+                  className="flex h-8 w-8 items-center justify-center rounded-r-lg text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-rose-200 disabled:opacity-40"
+                >
+                  +
+                </button>
+              </div>
+              <span className="text-sm font-bold text-slate-900">{won(item.lineTotal)}</span>
+            </div>
+          </div>
+        </li>
+      );
+    }
+
+    // ========================================
+    // 🛒 장바구니 드로어 (우측 슬라이드 패널)
+    // ========================================
+    function CartDrawer({ open, cart, loading, busyId, onClose, onQty, onRemove, onClear, onCheckout }) {
+      // ESC 로 닫기
+      useEffect(() => {
+        if (!open) return;
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [open, onClose]);
+
+      if (!open) return null;
+      const items = cart.items || [];
+
+      return (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="fade-in absolute inset-0 bg-slate-900/40" onClick={onClose} aria-hidden="true" />
+          <aside
+            className="drawer-in relative flex h-full w-full max-w-md flex-col bg-white shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="내 장바구니"
+          >
+            {/* 헤더 */}
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
+                🛒 내 장바구니
+                {cart.totalQuantity > 0 && (
+                  <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-600">
+                    {cart.totalQuantity}개
+                  </span>
+                )}
+              </h2>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="장바구니 닫기"
+                className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
+
+            {/* 본문 */}
+            <div className="flex-1 overflow-y-auto px-5">
+              {loading ? (
+                <div className="py-10"><LoadingBlock label="장바구니를 불러오는 중..." /></div>
+              ) : items.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="mb-3 text-5xl" aria-hidden="true">🧺</div>
+                  <p className="font-medium text-slate-500">장바구니가 비어 있어요</p>
+                  <p className="mt-1 text-sm text-slate-400">상품을 담아 보세요.</p>
+                  <Button variant="secondary" size="sm" className="mt-4" onClick={onClose}>상품 보러 가기</Button>
+                </div>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {items.map((item) => (
+                    <CartLine
+                      key={item.productId}
+                      item={item}
+                      busy={busyId === item.productId}
+                      onQty={onQty}
+                      onRemove={onRemove}
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* 푸터: 합계 + 액션 */}
+            {items.length > 0 && (
+              <div className="border-t border-slate-100 px-5 py-4">
+                <div className="mb-1 flex items-center justify-between text-sm text-slate-500">
+                  <span>총 수량</span>
+                  <span className="font-medium text-slate-700">{cart.totalQuantity}개</span>
+                </div>
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-600">총 금액 합계</span>
+                  <span className="text-2xl font-extrabold text-rose-600">{won(cart.totalAmount)}</span>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="md" className="flex-1" onClick={onClear}>
+                    전체 비우기
+                  </Button>
+                  <Button variant="primary" size="md" className="flex-1" onClick={onCheckout}>
+                    {won(cart.totalAmount)} 결제
+                  </Button>
+                </div>
+                <p className="mt-2 text-center text-[11px] text-slate-400">TossPayments 테스트 결제 — 실제로 청구되지 않아요.</p>
+              </div>
+            )}
+          </aside>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 💳 결제 화면(모달) — 주문 생성 + 토스 결제위젯 렌더(1회) + 결제 요청
+    // ========================================
+    function Checkout({ user, clientKey, cartAmount, onClose }) {
+      const [phase, setPhase] = useState('preparing'); // preparing | ready | requesting | error
+      const [order, setOrder] = useState(null);         // { orderId, amount, orderName }
+      const [error, setError] = useState('');
+      const widgetsRef = useRef(null);
+      const renderedRef = useRef(false);
+
+      // 주문 생성 → 위젯 초기화 → 결제수단/약관 렌더(단 1회, renderedRef 가드)
+      useEffect(() => {
+        let active = true;
+        (async () => {
+          try {
+            if (!clientKey) throw new Error('결제 모듈을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+            if (typeof TossPayments === 'undefined') throw new Error('결제 SDK 로딩에 실패했어요. 새로고침 후 다시 시도해 주세요.');
+
+            // 금액은 서버가 장바구니로 계산해서 돌려준다(클라 금액 불신).
+            const ord = await api('/api/orders', { method: 'POST', body: JSON.stringify({}) });
+            if (!active) return;
+            setOrder(ord);
+
+            const toss = TossPayments(clientKey);
+            const widgets = toss.widgets({ customerKey: 'user_' + user.id }); // 로그인 사용자별 고정 키
+            widgetsRef.current = widgets;
+            await widgets.setAmount({ currency: 'KRW', value: ord.amount });
+            if (!renderedRef.current) {
+              await widgets.renderPaymentMethods({ selector: '#payment-method', variantKey: 'DEFAULT' });
+              await widgets.renderAgreement({ selector: '#agreement', variantKey: 'AGREEMENT' });
+              renderedRef.current = true;
+            }
+            if (active) setPhase('ready');
+          } catch (e) {
+            if (active && e.name !== 'AuthError') { setError(e.message || '결제 준비 중 오류가 발생했어요.'); setPhase('error'); }
+          }
+        })();
+        return () => { active = false; };
+      }, []);
+
+      const requestPay = async () => {
+        if (!widgetsRef.current || !order) return;
+        setPhase('requesting');
+        setError('');
+        try {
+          // 성공 시 브라우저가 successUrl 로 리다이렉트 → 아래 코드는 실행되지 않음.
+          await widgetsRef.current.requestPayment({
+            orderId: order.orderId,
+            orderName: order.orderName,
+            successUrl: window.location.origin + '/?payment=success',
+            failUrl: window.location.origin + '/?payment=fail',
+            customerEmail: user.email,
+          });
+        } catch (e) {
+          if (e.code === 'USER_CANCEL') { setPhase('ready'); return; } // 사용자가 결제창 닫음
+          setError(e.message || '결제 요청 중 오류가 발생했어요.');
+          setPhase('ready');
+        }
+      };
+
+      const amount = order ? order.amount : cartAmount;
+
+      return (
+        <div className="fixed inset-0 z-[70] flex justify-center overflow-y-auto bg-slate-900/50 p-4 sm:items-center">
+          <Card className="my-auto w-full max-w-md p-0">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">💳 결제하기</h2>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="결제 닫기"
+                disabled={phase === 'requesting'}
+                className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:opacity-40"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="px-5 py-4">
+              {phase === 'error' ? (
+                <div className="py-8 text-center">
+                  <div className="mb-3 text-4xl" aria-hidden="true">⚠️</div>
+                  <p className="text-sm text-slate-600">{error}</p>
+                  <Button variant="secondary" size="md" className="mt-5" onClick={onClose}>닫기</Button>
+                </div>
+              ) : (
+                <>
+                  {/* 결제수단/약관 위젯이 렌더될 자리 — 항상 최상단·고정 위치(리렌더로 언마운트되지 않게 key 부여) */}
+                  <div id="payment-method" key="pm" />
+                  <div id="agreement" key="ag" />
+
+                  {phase === 'preparing' && (
+                    <div key="loading" className="py-6"><LoadingBlock label="결제 수단을 불러오는 중..." /></div>
+                  )}
+
+                  {error && phase !== 'preparing' && (
+                    <div key="err" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>
+                  )}
+
+                  {phase !== 'preparing' && (
+                    <div key="footer" className="mt-4 border-t border-slate-100 pt-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <span className="text-sm font-medium text-slate-600">최종 결제 금액</span>
+                        <span className="text-2xl font-extrabold text-rose-600">{won(amount)}</span>
+                      </div>
+                      <Button
+                        variant="primary"
+                        size="md"
+                        className="w-full"
+                        loading={phase === 'requesting'}
+                        disabled={phase !== 'ready'}
+                        onClick={requestPay}
+                      >
+                        {won(amount)} 결제하기
+                      </Button>
+                      <p className="mt-2 text-center text-[11px] text-slate-400">
+                        테스트 결제입니다. 카드번호 등 아무 값이나 입력해도 실제 청구되지 않아요.
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧾 마이페이지 — 내 결제(주문) 내역
+    // ========================================
+    function MyPage({ user, onBack, onUserChange }) {
+      const [orders, setOrders] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+      const [uploading, setUploading] = useState(false);   // 프로필 사진 업로드/저장 진행 중
+      const [avatarError, setAvatarError] = useState('');
+      const fileInputRef = useRef(null);
+
+      useEffect(() => {
+        let active = true;
+        (async () => {
+          try {
+            const list = await api('/api/orders');
+            if (active) setOrders(list);
+          } catch (e) {
+            if (active && e.name !== 'AuthError') setError(e.message);
+          } finally {
+            if (active) setLoading(false);
+          }
+        })();
+        return () => { active = false; };
+      }, []);
+
+      // 파일 선택 열기
+      const pickFile = () => { setAvatarError(''); if (fileInputRef.current) fileInputRef.current.click(); };
+
+      // 파일 선택 → ImageKit 업로드 → 서버에 URL 저장 → 앱 전역 user 갱신
+      const onFileChange = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (e.target) e.target.value = ''; // 같은 파일 재선택 허용
+        if (!file) return;
+        if (!file.type.startsWith('image/')) { setAvatarError('이미지 파일만 올릴 수 있어요.'); return; }
+        if (file.size > 5 * 1024 * 1024) { setAvatarError('5MB 이하 이미지만 올릴 수 있어요.'); return; }
+        setAvatarError('');
+        setUploading(true);
+        try {
+          const uploaded = await uploadAvatarToImageKit(file);
+          const data = await api('/api/profile/avatar', {
+            method: 'POST',
+            body: JSON.stringify({ avatarUrl: uploaded.url }),
+          });
+          onUserChange(data.user);
+        } catch (err) {
+          if (err.name !== 'AuthError') setAvatarError(err.message || '사진 변경에 실패했어요.');
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      // 기본 이미지(이니셜)로 되돌리기
+      const resetAvatar = async () => {
+        setAvatarError('');
+        setUploading(true);
+        try {
+          const data = await api('/api/profile/avatar', { method: 'POST', body: JSON.stringify({ avatarUrl: '' }) });
+          onUserChange(data.user);
+        } catch (err) {
+          if (err.name !== 'AuthError') setAvatarError(err.message || '되돌리기에 실패했어요.');
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      const totalSpent = orders.reduce((s, o) => s + Number(o.amount || 0), 0);
+
+      return (
+        <div className="min-h-screen bg-gradient-to-b from-amber-50 to-rose-50">
+          <header className="sticky top-0 z-30 border-b border-rose-100/70 bg-white/80 backdrop-blur">
+            <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-4 py-3">
+              <button
+                type="button"
+                onClick={onBack}
+                className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 focus:outline-none"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                쇼핑으로
+              </button>
+              <span className="text-lg font-extrabold tracking-tight text-slate-800">🧾 마이페이지</span>
+              <span className="w-16" />
+            </div>
+          </header>
+
+          <main className="mx-auto w-full max-w-3xl px-4 py-6 sm:py-8">
+            {/* 프로필 카드 — 사진 변경(ImageKit) */}
+            <div className="mb-6 flex flex-col items-center gap-4 rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm sm:flex-row sm:text-left">
+              <div className="relative flex-shrink-0">
+                <Avatar name={user.name || user.email} src={user.avatarUrl} size="xl" />
+                <button
+                  type="button"
+                  onClick={pickFile}
+                  disabled={uploading}
+                  aria-label="프로필 사진 변경"
+                  className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-rose-500 text-white shadow-md ring-2 ring-white transition-colors hover:bg-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-300 disabled:opacity-60"
+                >
+                  {uploading ? (
+                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                      <path d="M4 5a2 2 0 00-2 2v6a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-1.586a1 1 0 01-.707-.293l-1.121-1.121A2 2 0 0011.172 3H8.828a2 2 0 00-1.414.586L6.293 4.707A1 1 0 015.586 5H4zm6 9a3 3 0 100-6 3 3 0 000 6z" />
+                    </svg>
+                  )}
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-base font-bold text-slate-800">{user.name || user.email}</p>
+                <p className="truncate text-sm text-slate-500">{user.email}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  결제 완료 <span className="font-semibold text-rose-600">{orders.length}</span>건
+                  · 누적 <span className="font-semibold text-rose-600">{won(totalSpent)}</span>
+                </p>
+                <div className="mt-3 flex items-center justify-center gap-2 sm:justify-start">
+                  <Button variant="secondary" size="sm" onClick={pickFile} loading={uploading}>사진 변경</Button>
+                  {user.avatarUrl && (
+                    <Button variant="ghost" size="sm" onClick={resetAvatar} disabled={uploading}>기본 이미지</Button>
+                  )}
+                </div>
+                {avatarError && <p className="mt-2 text-xs text-red-500">{avatarError}</p>}
+              </div>
+            </div>
+
+            <h1 className="mb-3 text-lg font-bold text-slate-800">결제 내역</h1>
+
+            {loading ? (
+              <LoadingBlock label="주문 내역을 불러오는 중..." />
+            ) : error ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-600">{error}</div>
+            ) : orders.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 px-4 py-16 text-center">
+                <div className="mb-3 text-5xl" aria-hidden="true">🧾</div>
+                <p className="font-medium text-slate-500">아직 결제 내역이 없어요</p>
+                <p className="mt-1 text-sm text-slate-400">상품을 담고 결제하면 여기에 표시돼요.</p>
+                <Button variant="secondary" size="sm" className="mt-4" onClick={onBack}>상품 보러 가기</Button>
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {orders.map((o) => (
+                  <li key={o.orderId} className="item-in rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3 className="truncate text-[15px] font-semibold text-slate-800">{o.orderName}</h3>
+                          <span className="flex-shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">결제완료</span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-400">{fmtDate(o.paidAt || o.createdAt)}</p>
+                      </div>
+                      <span className="flex-shrink-0 text-lg font-bold text-slate-900">{won(o.amount)}</span>
+                    </div>
+                    {o.items && o.items.length > 0 && (
+                      <ul className="mt-3 space-y-1 border-t border-slate-100 pt-3">
+                        {o.items.map((it, idx) => (
+                          <li key={idx} className="flex items-center justify-between text-xs text-slate-500">
+                            <span className="truncate">{it.name} <span className="text-slate-400">× {it.quantity}</span></span>
+                            <span className="flex-shrink-0 text-slate-600">{won(it.lineTotal)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <p className="mt-2 font-mono text-[10px] text-slate-300">{o.orderId}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🏪 Shop App (인증된 사용자 화면)
+    // ========================================
+    const CATEGORIES = ['전체', '이유식 재료', '간식', '물품'];
+
+    function ShopApp({ user, onLogout, onRequireAuth, onMyPage }) {
+      const [products, setProducts] = useState([]);
+      const [productsLoading, setProductsLoading] = useState(true);
+      const [cart, setCart] = useState({ items: [], totalQuantity: 0, totalAmount: 0 });
+      const [cartLoading, setCartLoading] = useState(true);
+      const [cartOpen, setCartOpen] = useState(false);
+      const [checkoutOpen, setCheckoutOpen] = useState(false);
+      const [clientKey, setClientKey] = useState('');
+      const [filter, setFilter] = useState('전체');
+      const [error, setError] = useState('');
+      const [addingId, setAddingId] = useState(null);   // 담기 진행 중인 상품
+      const [justAddedId, setJustAddedId] = useState(null); // 방금 담음 ✓ 표시
+      const [busyId, setBusyId] = useState(null);       // 장바구니에서 수량/삭제 진행 중
+      const justAddedTimer = useRef(null);
+
+      // 상품: 최초 1회 로드 — 비로그인(게스트)도 볼 수 있는 공개 카탈로그
+      useEffect(() => {
+        let active = true;
+        (async () => {
+          try {
+            const list = await api('/api/products');
+            if (active) setProducts(list);
+          } catch (e) {
+            if (active && e.name !== 'AuthError') setError(e.message);
+          } finally {
+            if (active) setProductsLoading(false);
+          }
+        })();
+        return () => { active = false; };
+      }, []);
+
+      // 장바구니: 로그인 상태에서만 로드(게스트는 빈 장바구니)
+      useEffect(() => {
+        if (!user) {
+          setCart({ items: [], totalQuantity: 0, totalAmount: 0 });
+          setCartLoading(false);
+          return;
+        }
+        let active = true;
+        setCartLoading(true);
+        (async () => {
+          try {
+            const summary = await api('/api/cart');
+            if (active) setCart(summary);
+          } catch (e) {
+            if (active && e.name !== 'AuthError') setError(e.message);
+          } finally {
+            if (active) setCartLoading(false);
+          }
+        })();
+        return () => { active = false; };
+      }, [user]);
+
+      // 언마운트 시 "담음 ✓" 타이머 정리
+      useEffect(() => () => {
+        if (justAddedTimer.current) clearTimeout(justAddedTimer.current);
+      }, []);
+
+      // 결제위젯 클라이언트키(공개키) 로드 — 결제 모달에서 사용
+      useEffect(() => {
+        let active = true;
+        (async () => {
+          try {
+            const cfg = await api('/api/payments/config');
+            if (active) setClientKey(cfg.clientKey);
+          } catch (_e) { /* 결제 설정 미비 시 무시(결제 클릭 시 안내) */ }
+        })();
+        return () => { active = false; };
+      }, []);
+
+      const filtered = useMemo(
+        () => (filter === '전체' ? products : products.filter((p) => p.category === filter)),
+        [products, filter]
+      );
+
+      // 담기 (이미 담긴 상품이면 서버가 수량 누적) — 게스트는 로그인 화면으로 유도
+      const addToCart = useCallback(async (product) => {
+        if (!user) { onRequireAuth(); return; }
+        setError('');
+        setAddingId(product.id);
+        try {
+          const summary = await api('/api/cart', {
+            method: 'POST',
+            body: JSON.stringify({ productId: product.id, quantity: 1 }),
+          });
+          setCart(summary);
+          setJustAddedId(product.id);
+          if (justAddedTimer.current) clearTimeout(justAddedTimer.current);
+          justAddedTimer.current = setTimeout(() => setJustAddedId(null), 1200);
+        } catch (e) {
+          if (e.name !== 'AuthError') setError(e.message);
+        } finally {
+          setAddingId(null);
+        }
+      }, [user, onRequireAuth]);
+
+      // 수량 변경 (1 미만이면 변경하지 않음 — 스테퍼가 1에서 멈춤)
+      const changeQty = useCallback(async (productId, quantity) => {
+        if (quantity < 1) return;
+        setError('');
+        setBusyId(productId);
+        try {
+          const summary = await api(`/api/cart/${productId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ quantity }),
+          });
+          setCart(summary);
+        } catch (e) {
+          if (e.name !== 'AuthError') setError(e.message);
+        } finally {
+          setBusyId(null);
+        }
+      }, []);
+
+      // 한 상품 삭제
+      const removeItem = useCallback(async (productId) => {
+        setError('');
+        setBusyId(productId);
+        try {
+          const summary = await api(`/api/cart/${productId}`, { method: 'DELETE' });
+          setCart(summary);
+        } catch (e) {
+          if (e.name !== 'AuthError') setError(e.message);
+        } finally {
+          setBusyId(null);
+        }
+      }, []);
+
+      // 전체 비우기
+      const clearCart = useCallback(async () => {
+        if (!window.confirm('장바구니를 전부 비울까요?')) return;
+        setError('');
+        try {
+          const summary = await api('/api/cart', { method: 'DELETE' });
+          setCart(summary);
+        } catch (e) {
+          if (e.name !== 'AuthError') setError(e.message);
+        }
+      }, []);
+
+      return (
+        <div className="min-h-screen bg-gradient-to-b from-amber-50 to-rose-50">
+          {/* 상단 바 */}
+          <header className="sticky top-0 z-30 border-b border-rose-100/70 bg-white/80 backdrop-blur">
+            <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl" aria-hidden="true">🍼</span>
+                <span className="text-lg font-extrabold tracking-tight text-slate-800">우리 아이 마켓</span>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                {user && (
+                  <div className="hidden min-w-0 items-center gap-2 text-sm text-slate-500 sm:flex">
+                    <Avatar name={user.name || user.email} src={user.avatarUrl} />
+                    <span className="max-w-[10rem] truncate" title={user.email}>{user.email}</span>
+                  </div>
+                )}
+                {/* 장바구니 버튼 + 배지 — 게스트가 누르면 로그인 화면으로 */}
+                <button
+                  type="button"
+                  onClick={() => (user ? setCartOpen(true) : onRequireAuth())}
+                  aria-label="장바구니"
+                  className="relative inline-flex items-center gap-1.5 rounded-lg bg-rose-500 px-3 py-2 text-sm font-medium text-white hover:bg-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-300"
+                >
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293A1 1 0 005.414 17H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <span className="hidden sm:inline">장바구니</span>
+                  {user && cart.totalQuantity > 0 && (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-amber-400 px-1 text-[11px] font-bold text-white ring-2 ring-white">
+                      {cart.totalQuantity}
+                    </span>
+                  )}
+                </button>
+                {user ? (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={onMyPage} className="flex-shrink-0">
+                      마이페이지
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={onLogout} className="flex-shrink-0">
+                      로그아웃
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="primary" size="sm" onClick={onRequireAuth} className="flex-shrink-0">
+                    로그인
+                  </Button>
+                )}
+              </div>
+            </div>
+          </header>
+
+          {/* 본문 */}
+          <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:py-8">
+            <div className="mb-5">
+              <h1 className="text-2xl font-bold tracking-tight text-slate-800">영유아 식재료 · 물품</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                우리 아이를 위한 상품 <span className="font-semibold text-rose-600">{products.length}</span>개
+              </p>
+              {!user && (
+                <p className="mt-3 inline-flex flex-wrap items-center gap-1.5 rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-600">
+                  🔒 상품은 누구나 볼 수 있어요. 장바구니에 담으려면
+                  <button type="button" onClick={onRequireAuth} className="font-bold underline underline-offset-2 hover:text-rose-700 focus:outline-none">
+                    로그인
+                  </button>
+                  이 필요해요.
+                </p>
+              )}
+            </div>
+
+            {/* 카테고리 필터 */}
+            <div className="mb-5 flex flex-wrap gap-2">
+              {CATEGORIES.map((c) => {
+                const active = filter === c;
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setFilter(c)}
+                    className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-rose-300 ${
+                      active ? 'bg-rose-500 text-white' : 'bg-white text-slate-600 hover:bg-rose-50'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                );
+              })}
+            </div>
+
+            {productsLoading ? (
+              <LoadingBlock label="상품을 불러오는 중..." />
+            ) : filtered.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-slate-200 px-4 py-14 text-center text-slate-400">
+                해당 카테고리에 상품이 없어요.
+              </div>
+            ) : (
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+                {filtered.map((product) => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    onAdd={addToCart}
+                    adding={addingId === product.id}
+                    justAdded={justAddedId === product.id}
+                  />
+                ))}
+              </ul>
+            )}
+          </main>
+
+          {/* 장바구니 드로어 */}
+          <CartDrawer
+            open={cartOpen}
+            cart={cart}
+            loading={cartLoading}
+            busyId={busyId}
+            onClose={() => setCartOpen(false)}
+            onQty={changeQty}
+            onRemove={removeItem}
+            onClear={clearCart}
+            onCheckout={() => { setCartOpen(false); setCheckoutOpen(true); }}
+          />
+
+          {/* 결제 모달 */}
+          {checkoutOpen && (
+            <Checkout
+              user={user}
+              clientKey={clientKey}
+              cartAmount={cart.totalAmount}
+              onClose={() => setCheckoutOpen(false)}
+            />
+          )}
+
+          <ErrorToast message={error} onClose={() => setError('')} />
+        </div>
+      );
+    }
+
+    // 전체 화면 로딩(앱 부팅 시 토큰 검증 중)
+    function BootScreen() {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-amber-50 to-rose-100">
+          <div className="flex flex-col items-center text-center">
+            <div className="mb-3 text-4xl" aria-hidden="true">🍼</div>
+            <svg className="mb-3 h-8 w-8 animate-spin text-rose-500" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+            <p className="text-sm text-slate-400">불러오는 중...</p>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 💳 결제 결과 화면 — 토스 리다이렉트 복귀 시 승인(confirm) 처리
+    // ========================================
+    function PaymentResultScreen({ info, onDone, onViewOrders }) {
+      const [state, setState] = useState(info.kind === 'success' ? 'confirming' : 'fail');
+      const [order, setOrder] = useState(null);
+      const [message, setMessage] = useState(info.message || '결제가 취소되었거나 실패했어요.');
+      const ranRef = useRef(false);
+
+      useEffect(() => {
+        if (info.kind !== 'success' || ranRef.current) return;
+        ranRef.current = true; // StrictMode/재실행 방어 — confirm 은 단 1회
+        (async () => {
+          try {
+            const data = await api('/api/payments/confirm', {
+              method: 'POST',
+              body: JSON.stringify({ paymentKey: info.paymentKey, orderId: info.orderId, amount: Number(info.amount) }),
+            });
+            setOrder(data);
+            setState('success');
+          } catch (e) {
+            setMessage(e.name === 'AuthError'
+              ? '로그인이 만료되었어요. 다시 로그인 후 마이페이지에서 주문 내역을 확인해 주세요.'
+              : (e.message || '결제 승인에 실패했어요.'));
+            setState('fail');
+          }
+        })();
+      }, []);
+
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-amber-50 to-rose-100 px-4 py-10">
+          <Card className="w-full max-w-sm p-7 text-center">
+            {state === 'confirming' && (
+              <>
+                <svg className="mx-auto mb-4 h-10 w-10 animate-spin text-rose-500" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+                <h1 className="text-lg font-bold text-slate-800">결제를 확인하고 있어요</h1>
+                <p className="mt-1 text-sm text-slate-500">잠시만 기다려 주세요...</p>
+              </>
+            )}
+            {state === 'success' && (
+              <>
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-4xl" aria-hidden="true">✅</div>
+                <h1 className="text-xl font-bold text-slate-800">결제가 완료되었어요!</h1>
+                <p className="mt-1 text-sm text-slate-500">주문해 주셔서 감사합니다.</p>
+                {order && (
+                  <div className="mt-5 rounded-xl bg-slate-50 px-4 py-4 text-left text-sm">
+                    <div className="flex justify-between py-1"><span className="text-slate-500">상품</span><span className="font-medium text-slate-800">{order.orderName}</span></div>
+                    <div className="flex justify-between py-1"><span className="text-slate-500">결제 금액</span><span className="font-bold text-rose-600">{won(order.amount)}</span></div>
+                    <div className="flex justify-between py-1"><span className="text-slate-500">주문번호</span><span className="font-mono text-[11px] text-slate-400">{order.orderId}</span></div>
+                  </div>
+                )}
+                <div className="mt-6 flex gap-2">
+                  <Button variant="secondary" size="md" className="flex-1" onClick={onViewOrders}>주문 내역</Button>
+                  <Button variant="primary" size="md" className="flex-1" onClick={onDone}>쇼핑 계속하기</Button>
+                </div>
+              </>
+            )}
+            {state === 'fail' && (
+              <>
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-4xl" aria-hidden="true">⚠️</div>
+                <h1 className="text-xl font-bold text-slate-800">결제를 완료하지 못했어요</h1>
+                <p className="mt-2 text-sm text-slate-500">{message}</p>
+                <Button variant="primary" size="md" className="mt-6 w-full" onClick={onDone}>돌아가기</Button>
+              </>
+            )}
+          </Card>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component — 상품 목록이 첫 화면(게스트 열람 가능), 장바구니·결제는 로그인 게이트
+    // status: 'booting' | 'shop'(게스트/로그인 공통) | 'auth'(로그인/회원가입) | 'mypage'(결제내역)
+    // pay: 토스 결제 리다이렉트 결과(있으면 최우선으로 결제 결과 화면 표시)
+    // ========================================
+    function App() {
+      const [status, setStatus] = useState('booting');
+      const [user, setUser] = useState(null);
+      const [pay, setPay] = useState(null); // null | { kind:'success'|'fail', ... }
+
+      // 토큰 만료·무효(401) → 로그아웃 상태로. 상품은 공개라 화면은 그대로 둔다.
+      useEffect(() => {
+        setUnauthorizedHandler(() => {
+          setUser(null);
+        });
+      }, []);
+
+      // 부팅: (1) 토스 결제 리다이렉트 감지 (2) 저장된 토큰 검증(없거나 실패해도 게스트 진입).
+      useEffect(() => {
+        let active = true;
+
+        const q = parsePaymentParams();
+        const paymentKey = q.get('paymentKey');
+        const orderId = q.get('orderId');
+        const amount = q.get('amount');
+        if (paymentKey && orderId && amount) {
+          setPay({ kind: 'success', paymentKey, orderId, amount });
+        } else if (q.get('payment') === 'fail' || q.get('code')) {
+          setPay({ kind: 'fail', message: q.get('message') || '' });
+        }
+
+        const token = tokenStore.get();
+        if (!token) {
+          setStatus('shop');
+          return;
+        }
+        (async () => {
+          try {
+            const data = await api('/api/auth/me'); // 200 → { user:{ id, email, name } }
+            if (!active) return;
+            setUser(data.user);
+            setStatus('shop');
+          } catch (_e) {
+            if (active) setStatus('shop'); // 게스트로 진입
+          }
+        })();
+        return () => { active = false; };
+      }, []);
+
+      const handleAuthed = useCallback((u) => {
+        setUser(u);
+        setStatus('shop');
+      }, []);
+
+      const handleLogout = useCallback(() => {
+        tokenStore.clear();
+        setUser(null);
+        setStatus('shop');
+      }, []);
+
+      const goToAuth = useCallback(() => setStatus('auth'), []);
+      const backToShop = useCallback(() => setStatus('shop'), []);
+      const goToMyPage = useCallback(() => setStatus('mypage'), []);
+
+      // 결제 결과 화면 닫기 — URL 의 결제 파라미터를 제거해 새로고침 시 재confirm 을 막는다.
+      const dismissPay = useCallback(() => {
+        setPay(null);
+        window.history.replaceState({}, '', window.location.pathname);
+      }, []);
+      const viewOrdersFromPay = useCallback(() => {
+        setPay(null);
+        window.history.replaceState({}, '', window.location.pathname);
+        setStatus('mypage');
+      }, []);
+
+      if (pay) return <PaymentResultScreen info={pay} onDone={dismissPay} onViewOrders={viewOrdersFromPay} />;
+      if (status === 'booting') return <BootScreen />;
+      if (status === 'auth') return <AuthScreen onAuthed={handleAuthed} onBack={backToShop} />;
+      if (status === 'mypage' && user) return <MyPage user={user} onBack={backToShop} onUserChange={setUser} />;
+      return <ShopApp user={user} onLogout={handleLogout} onRequireAuth={goToAuth} onMyPage={goToMyPage} />;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+- [Workspace structure](project_workspace_structure.md) — what week_1/2/3 folders contain; lessons live in example files, not notes
+- [Week_2 HTML progression](project_week2_html_progression.md) — the 260602 in-class ladder from raw HTML tags → React-in-browser

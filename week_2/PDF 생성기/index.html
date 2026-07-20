@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF 생성기</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --border: #e3e6ea;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --primary: #4f46e5;
+    --primary-hover: #4338ca;
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+
+  .app {
+    width: 100%;
+    max-width: 720px;
+    background: var(--surface);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .app__header {
+    padding: 28px 32px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .app__header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .app__header p {
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .app__body {
+    padding: 28px 32px;
+  }
+
+  .field {
+    margin-bottom: 22px;
+  }
+
+  .field:last-child {
+    margin-bottom: 0;
+  }
+
+  .field label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+
+  .field input,
+  .field textarea {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    background: #fafbfc;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    resize: vertical;
+  }
+
+  .field input:focus,
+  .field textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+    background: #fff;
+  }
+
+  .field textarea {
+    min-height: 240px;
+    line-height: 1.6;
+  }
+
+  .field .hint {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: right;
+  }
+
+  .app__footer {
+    display: flex;
+    gap: 12px;
+    padding: 20px 32px 0;
+  }
+
+  .app__status {
+    padding: 12px 32px 24px;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+    min-height: 18px;
+  }
+
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  button {
+    flex: 1;
+    padding: 13px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.05s;
+  }
+
+  button:active {
+    transform: translateY(1px);
+  }
+
+  .btn-primary {
+    background: var(--primary);
+    color: #fff;
+  }
+
+  .btn-primary:hover {
+    background: var(--primary-hover);
+  }
+
+  .btn-secondary {
+    flex: 0 0 auto;
+    background: #f1f2f4;
+    color: var(--text);
+  }
+
+  .btn-secondary:hover {
+    background: #e7e9ec;
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="app__header">
+      <h1>PDF 생성기</h1>
+      <p>작성한 내용을 깔끔한 PDF 문서로 변환해 드립니다.</p>
+    </div>
+
+    <div class="app__body">
+      <div class="field">
+        <label for="title">제목</label>
+        <input type="text" id="title" placeholder="문서 제목을 입력하세요" maxlength="80">
+      </div>
+
+      <div class="field">
+        <label for="content">내용</label>
+        <textarea id="content" placeholder="이곳에 내용을 작성하세요..."></textarea>
+        <div class="hint"><span id="charCount">0</span>자</div>
+      </div>
+    </div>
+
+    <div class="app__footer">
+      <button class="btn-secondary" id="clearBtn">지우기</button>
+      <button class="btn-primary" id="generateBtn">PDF 생성</button>
+    </div>
+    <div class="app__status" id="status"></div>
+  </div>
+
+<script>
+  const { jsPDF } = window.jspdf;
+
+  const titleInput = document.getElementById('title');
+  const contentInput = document.getElementById('content');
+  const charCount = document.getElementById('charCount');
+  const generateBtn = document.getElementById('generateBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const status = document.getElementById('status');
+
+  // 한글을 지원하는 NanumGothic TTF (Google Fonts 저장소)
+  const FONTS = {
+    normal: {
+      url: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/nanumgothic/NanumGothic-Regular.ttf',
+      vfs: 'NanumGothic-Regular.ttf',
+      style: 'normal'
+    },
+    bold: {
+      url: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/nanumgothic/NanumGothic-Bold.ttf',
+      vfs: 'NanumGothic-Bold.ttf',
+      style: 'bold'
+    }
+  };
+  const FONT_FAMILY = 'NanumGothic';
+  let fontsReady = false;
+
+  contentInput.addEventListener('input', () => {
+    charCount.textContent = contentInput.value.length;
+  });
+
+  clearBtn.addEventListener('click', () => {
+    titleInput.value = '';
+    contentInput.value = '';
+    charCount.textContent = '0';
+    titleInput.focus();
+  });
+
+  // ArrayBuffer -> base64 변환
+  function arrayBufferToBase64(buffer) {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  // 폰트를 받아 jsPDF VFS에 등록 (최초 1회)
+  async function ensureFonts(doc) {
+    for (const key of Object.keys(FONTS)) {
+      const f = FONTS[key];
+      if (!fontsReady) {
+        const res = await fetch(f.url);
+        if (!res.ok) throw new Error('폰트 다운로드 실패: ' + f.url);
+        const base64 = arrayBufferToBase64(await res.arrayBuffer());
+        f.data = base64;
+      }
+      doc.addFileToVFS(f.vfs, f.data);
+      doc.addFont(f.vfs, FONT_FAMILY, f.style);
+    }
+    fontsReady = true;
+  }
+
+  generateBtn.addEventListener('click', async () => {
+    const title = titleInput.value.trim();
+    const content = contentInput.value.trim();
+
+    if (!title && !content) {
+      alert('제목 또는 내용을 입력해 주세요.');
+      return;
+    }
+
+    const doc = new jsPDF({
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    generateBtn.disabled = true;
+    clearBtn.disabled = true;
+    try {
+      if (!fontsReady) {
+        status.textContent = '한글 폰트를 불러오는 중입니다... (최초 1회)';
+      }
+      await ensureFonts(doc);
+      status.textContent = 'PDF를 생성하는 중...';
+      buildPdf(doc, title, content);
+      status.textContent = '완료되었습니다.';
+      setTimeout(() => { status.textContent = ''; }, 2500);
+    } catch (err) {
+      console.error(err);
+      status.textContent = '오류가 발생했습니다: ' + err.message;
+    } finally {
+      generateBtn.disabled = false;
+      clearBtn.disabled = false;
+    }
+  });
+
+  function buildPdf(doc, title, content) {
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const marginX = 20;
+    const marginTop = 25;
+    const marginBottom = 20;
+    const contentWidth = pageWidth - marginX * 2;
+    let cursorY = marginTop;
+
+    // 제목
+    if (title) {
+      doc.setFont(FONT_FAMILY, 'bold');
+      doc.setFontSize(20);
+      doc.setTextColor(31, 41, 55);
+      const titleLines = doc.splitTextToSize(title, contentWidth);
+      doc.text(titleLines, marginX, cursorY);
+      cursorY += titleLines.length * 9 + 4;
+
+      // 구분선
+      doc.setDrawColor(227, 230, 234);
+      doc.setLineWidth(0.4);
+      doc.line(marginX, cursorY, pageWidth - marginX, cursorY);
+      cursorY += 10;
+    }
+
+    // 내용
+    if (content) {
+      doc.setFont(FONT_FAMILY, 'normal');
+      doc.setFontSize(12);
+      doc.setTextColor(55, 65, 81);
+
+      const lineHeight = 7;
+      const paragraphs = content.split('\n');
+
+      paragraphs.forEach((paragraph) => {
+        const lines = paragraph
+          ? doc.splitTextToSize(paragraph, contentWidth)
+          : [''];
+
+        lines.forEach((line) => {
+          if (cursorY + lineHeight > pageHeight - marginBottom) {
+            doc.addPage();
+            cursorY = marginTop;
+          }
+          doc.text(line, marginX, cursorY);
+          cursorY += lineHeight;
+        });
+      });
+    }
+
+    const fileName = (title || 'document').replace(/[\\/:*?"<>|]/g, '_');
+    doc.save(`${fileName}.pdf`);
+  }
+</script>
+</body>
+</html>

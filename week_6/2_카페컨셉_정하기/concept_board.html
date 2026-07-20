@@ -1,0 +1,390 @@
+<title>놀담 Noldam — 컨셉 보드 &amp; 메뉴판</title>
+<script>document.documentElement.classList.add('js')</script>
+<style>
+  :root{
+    --ground:#F1F3ED; --surface:#FBFCF9; --surface-2:#FFFFFF;
+    --ink:#2C2A25; --ink-soft:#6E685E; --line:#E1E4DA;
+    --sage:#7E9E76; --sage-deep:#5A7A53; --sage-tint:#E5EEDF;
+    --apricot:#DB955F; --apricot-deep:#B9713B; --apricot-tint:#F7E6D6;
+    --shadow:0 1px 2px rgba(44,42,37,.04), 0 8px 24px rgba(44,42,37,.05);
+    --radius:16px;
+    --sans:'Pretendard','Pretendard Variable','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#191A16; --surface:#222420; --surface-2:#292B25;
+      --ink:#ECEAE1; --ink-soft:#A39B8C; --line:#34362E;
+      --sage:#9EBD94; --sage-deep:#B7D3AD; --sage-tint:#28321F;
+      --apricot:#E3A876; --apricot-deep:#EBB98C; --apricot-tint:#382B1F;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#191A16; --surface:#222420; --surface-2:#292B25;
+    --ink:#ECEAE1; --ink-soft:#A39B8C; --line:#34362E;
+    --sage:#9EBD94; --sage-deep:#B7D3AD; --sage-tint:#28321F;
+    --apricot:#E3A876; --apricot-deep:#EBB98C; --apricot-tint:#382B1F;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --ground:#F1F3ED; --surface:#FBFCF9; --surface-2:#FFFFFF;
+    --ink:#2C2A25; --ink-soft:#6E685E; --line:#E1E4DA;
+    --sage:#7E9E76; --sage-deep:#5A7A53; --sage-tint:#E5EEDF;
+    --apricot:#DB955F; --apricot-deep:#B9713B; --apricot-tint:#F7E6D6;
+    --shadow:0 1px 2px rgba(44,42,37,.04), 0 8px 24px rgba(44,42,37,.05);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+    line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  .bg{position:fixed;inset:0;overflow:hidden;z-index:-1;pointer-events:none}
+  .blob{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5}
+  .b1{width:52vw;height:52vw;background:radial-gradient(circle,var(--sage-tint),transparent 70%);top:-14vw;right:-10vw}
+  .b2{width:46vw;height:46vw;background:radial-gradient(circle,var(--apricot-tint),transparent 70%);bottom:-16vw;left:-12vw;opacity:.45}
+
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 22px 72px}
+
+  /* segmented toggle */
+  .switch{display:inline-flex;gap:4px;padding:5px;margin:0 auto 34px;
+    background:var(--surface);border:1px solid var(--line);border-radius:999px;
+    box-shadow:var(--shadow);position:sticky;top:16px;z-index:5}
+  .switchwrap{display:flex;justify-content:center}
+  .seg{appearance:none;border:0;background:transparent;color:var(--ink-soft);
+    font-family:inherit;font-size:.94rem;font-weight:650;letter-spacing:.01em;
+    padding:9px 22px;border-radius:999px;cursor:pointer;transition:color .2s,background .2s}
+  .seg:hover{color:var(--ink)}
+  .seg.active{background:var(--sage);color:#fff}
+  @media (prefers-color-scheme:dark){.seg.active{color:#14160f}}
+  :root[data-theme="dark"] .seg.active{color:#14160f}
+  :root[data-theme="light"] .seg.active{color:#fff}
+
+  .view{animation:fade .35s ease both}
+  :root.js .view[data-active="false"]{display:none}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .eyebrow{font-size:.72rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--sage-deep);margin:0 0 18px}
+
+  /* hero */
+  .hero{text-align:center;padding:8px 0 6px}
+  .wordmark{font-size:clamp(3.4rem,11vw,6rem);font-weight:800;letter-spacing:-.03em;
+    line-height:.95;margin:0;text-wrap:balance;display:flex;flex-direction:column;align-items:center;gap:6px}
+  .wordmark .latin{font-size:.2em;font-weight:600;letter-spacing:.42em;text-transform:uppercase;
+    color:var(--ink-soft);padding-left:.42em}
+  .name-gloss{color:var(--ink-soft);font-size:.98rem;margin:16px 0 0}
+  .lead{max-width:36ch;margin:22px auto 0;font-size:clamp(1.02rem,2.1vw,1.18rem);
+    color:var(--ink);text-wrap:pretty}
+  .slogan{font-size:clamp(1.5rem,4.2vw,2.35rem);font-weight:750;letter-spacing:-.01em;
+    margin:30px auto 0;color:var(--sage-deep);text-wrap:balance}
+  .moods{list-style:none;display:flex;flex-wrap:wrap;gap:8px;justify-content:center;
+    padding:0;margin:26px 0 0}
+  .moods li{font-size:.8rem;font-weight:600;color:var(--ink-soft);
+    background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 14px}
+
+  .divider{height:1px;background:var(--line);border:0;margin:46px 0 40px}
+
+  /* concept grid */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px 22px 24px;box-shadow:var(--shadow)}
+  .card .label{font-size:.74rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--apricot-deep);margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .card .label::before{content:"";width:18px;height:2px;border-radius:2px;background:var(--apricot)}
+  .card h3{font-size:1.02rem;margin:0 0 8px;font-weight:700}
+  .card p{margin:0;color:var(--ink-soft);font-size:.95rem}
+  .card ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:9px}
+  .card ul li{position:relative;padding-left:16px;color:var(--ink-soft);font-size:.95rem}
+  .card ul li::before{content:"";position:absolute;left:0;top:.62em;width:6px;height:6px;
+    border-radius:50%;background:var(--sage)}
+  .card ul li b{color:var(--ink);font-weight:650}
+  .price-lines{display:flex;flex-direction:column;gap:10px}
+  .price-lines div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+    font-size:.95rem;border-bottom:1px dashed var(--line);padding-bottom:9px}
+  .price-lines div:last-child{border-bottom:0;padding-bottom:0}
+  .price-lines .k{color:var(--ink-soft)}
+  .price-lines .v{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  /* differentiator band */
+  .diff{margin-top:16px;background:linear-gradient(135deg,var(--sage-tint),var(--surface));
+    border:1px solid var(--line);border-radius:var(--radius);padding:30px 28px}
+  .diff .label{font-size:.74rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--sage-deep);margin:0 0 14px}
+  .diff blockquote{margin:0;font-size:clamp(1.15rem,2.6vw,1.5rem);font-weight:700;
+    line-height:1.4;letter-spacing:-.01em;text-wrap:balance}
+  .diff .sub{margin:16px 0 0;color:var(--ink-soft);font-size:.96rem}
+
+  /* palette + short slogan */
+  .footer-row{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px}
+  .palette{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px;box-shadow:var(--shadow)}
+  .palette .label{font-size:.74rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-soft);margin:0 0 16px}
+  .swatches{display:flex;gap:14px;flex-wrap:wrap}
+  .sw{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+  .sw .chip{width:56px;height:56px;border-radius:12px;border:1px solid var(--line)}
+  .sw .nm{font-size:.78rem;font-weight:650}
+  .sw .hx{font-size:.72rem;color:var(--ink-soft);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  .short-slogan{background:var(--apricot-tint);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px;display:flex;flex-direction:column;justify-content:center;gap:6px}
+  .short-slogan .label{font-size:.72rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--apricot-deep);margin:0}
+  .short-slogan strong{font-size:1.32rem;font-weight:750;letter-spacing:-.01em;color:var(--ink)}
+
+  /* MENU */
+  .menu-head{text-align:center;margin-bottom:8px}
+  .menu-title{font-size:clamp(2.6rem,8vw,4rem);font-weight:800;letter-spacing:-.03em;margin:0}
+  .menu-sub{color:var(--ink-soft);margin:12px 0 0;font-size:.96rem;letter-spacing:.02em}
+  .menu-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:38px}
+  .msec{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:24px 24px 26px;box-shadow:var(--shadow)}
+  .msec > header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+    padding-bottom:14px;margin-bottom:16px;border-bottom:2px solid var(--sage-tint)}
+  .msec h3{margin:0;font-size:1.24rem;font-weight:750;letter-spacing:-.01em}
+  .msec .en{font-size:.72rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--sage-deep)}
+  .items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:15px}
+  .item{display:flex;justify-content:space-between;align-items:baseline;gap:14px}
+  .item-name{font-weight:650;font-size:1rem}
+  .item-desc{display:block;color:var(--ink-soft);font-size:.86rem;font-weight:400;margin-top:3px;line-height:1.45}
+  .item-price{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--ink)}
+  .tag{display:inline-block;font-size:.6rem;font-weight:800;letter-spacing:.1em;vertical-align:middle;
+    color:var(--apricot-deep);background:var(--apricot-tint);border-radius:5px;padding:2px 6px;margin-left:6px;transform:translateY(-1px)}
+  .msec.play{grid-column:1/-1;background:linear-gradient(135deg,var(--sage-tint),var(--surface))}
+  .note{margin:16px 0 0;font-size:.82rem;color:var(--ink-soft);display:flex;align-items:flex-start;gap:8px}
+  .note::before{content:"※";color:var(--sage-deep);font-weight:700}
+  .menu-foot{text-align:center;color:var(--ink-soft);font-size:.82rem;margin:30px auto 0;max-width:46ch;line-height:1.6}
+
+  .foot{text-align:center;margin-top:52px;color:var(--ink-soft);font-size:.8rem}
+  .foot .mk{font-weight:700;color:var(--ink);letter-spacing:.02em}
+
+  :focus-visible{outline:2px solid var(--sage);outline-offset:3px;border-radius:6px}
+
+  @media (max-width:640px){
+    .footer-row{grid-template-columns:1fr}
+    .menu-grid{grid-template-columns:1fr}
+    .wrap{padding:22px 16px 56px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+  }
+</style>
+
+<div class="bg"><span class="blob b1"></span><span class="blob b2"></span></div>
+
+<main class="wrap">
+  <div class="switchwrap">
+    <nav class="switch" role="tablist" aria-label="보기 전환">
+      <button class="seg active" data-view="board" role="tab" aria-selected="true">컨셉 보드</button>
+      <button class="seg" data-view="menu" role="tab" aria-selected="false">메뉴판</button>
+    </nav>
+  </div>
+
+  <!-- ============ 컨셉 보드 ============ -->
+  <section class="view" id="view-board" data-active="true">
+    <header class="hero">
+      <p class="eyebrow">Café Concept · 카페 컨셉 기획서</p>
+      <h1 class="wordmark">놀담<span class="latin">Noldam</span></h1>
+      <p class="name-gloss">‘놀다’ + ‘담다’ — 아이가 노는 시간을 그대로 담다</p>
+      <p class="lead">근교의 감각적인 모던 공간에서, 아이는 안전하게 뛰놀고 부모는 제대로 된 브런치와 커피로 진짜 쉬어가는 키즈 브런치 카페.</p>
+      <p class="slogan">“아이는 놀고, 어른은 쉬고.”</p>
+      <ul class="moods">
+        <li>모던</li><li>미니멀</li><li>안심</li><li>감각</li><li>키즈프렌들리</li><li>브런치 맛집</li>
+      </ul>
+    </header>
+
+    <hr class="divider">
+
+    <div class="grid">
+      <article class="card">
+        <p class="label">타겟 손님</p>
+        <p>주말에 아이를 데려오는 부모. 아이는 마음껏 놀게 풀어두고, 부모는 커피·브런치로 여유를 되찾는 <b style="color:var(--ink)">가족 단위 손님</b>.</p>
+      </article>
+
+      <article class="card">
+        <p class="label">위치 · 상권</p>
+        <ul>
+          <li><b>기본</b> — 서울 근교 드라이브 상권(양평·김포·파주). 넓은 부지·주차·마당.</li>
+          <li><b>대안</b> — 임대료가 낮다면 신도시 대단지 근처(유모차 도보 접근).</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <p class="label">시그니처 메뉴</p>
+        <ul>
+          <li><b>부모용</b> — 리코타 팬케이크 &amp; 에그 베네딕트</li>
+          <li><b>아이용</b> — 과일 미니 팬케이크 · 저당 간식</li>
+          <li><b>기본기</b> — 좋은 원두의 스페셜티 커피</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <p class="label">분위기 · 인테리어</p>
+        <p>모던·미니멀 키즈존. 화이트·파스텔톤의 깔끔한 공간, 유리 파티션으로 분리한 <b style="color:var(--ink)">안전 놀이존</b> — 앉은 자리에서 아이가 다 보인다.</p>
+      </article>
+
+      <article class="card">
+        <p class="label">가격대</p>
+        <div class="price-lines">
+          <div><span class="k">아메리카노</span><span class="v">₩4,500–5,000</span></div>
+          <div><span class="k">1인 브런치</span><span class="v">₩15,000–20,000</span></div>
+          <div><span class="k">놀이존 이용</span><span class="v">₩10,000–20,000</span></div>
+        </div>
+      </article>
+
+      <article class="card" style="display:flex;flex-direction:column;justify-content:center;background:var(--sage-tint);border-color:transparent">
+        <p class="label" style="color:var(--sage-deep)">한 줄 요약</p>
+        <p style="color:var(--ink);font-weight:600;font-size:1rem">감각적인 공간 · 안심되는 놀이 · 제대로 된 브런치 — 주말 나들이의 새 기준.</p>
+      </article>
+    </div>
+
+    <hr class="divider">
+
+    <section class="diff">
+      <p class="label">차별점 · What makes us different</p>
+      <blockquote>“유치하지 않은 감각적인 공간에서, 앉은 자리에서 아이가 다 보여 부모가 진짜로 쉴 수 있는 키즈 브런치 카페.”</blockquote>
+      <p class="sub">감각(예쁜 공간) + 안심(안전 설계) — 시끄럽고 촌스러운 기존 키즈카페와 포지션이 확실히 갈린다.</p>
+    </section>
+
+    <div class="footer-row">
+      <div class="palette">
+        <p class="label">Brand Palette</p>
+        <div class="swatches">
+          <div class="sw"><span class="chip" style="background:#F1F3ED"></span><span class="nm">Milk</span><span class="hx">#F1F3ED</span></div>
+          <div class="sw"><span class="chip" style="background:#7E9E76"></span><span class="nm">Sage</span><span class="hx">#7E9E76</span></div>
+          <div class="sw"><span class="chip" style="background:#DB955F"></span><span class="nm">Apricot</span><span class="hx">#DB955F</span></div>
+          <div class="sw"><span class="chip" style="background:#2C2A25"></span><span class="nm">Espresso</span><span class="hx">#2C2A25</span></div>
+        </div>
+      </div>
+      <div class="short-slogan">
+        <p class="label">Short Slogan</p>
+        <strong>“예쁜데, 안심되는 곳.”</strong>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 메뉴판 초안 ============ -->
+  <section class="view" id="view-menu" data-active="false">
+    <header class="menu-head">
+      <p class="eyebrow">Menu · 메뉴판 초안</p>
+      <h2 class="menu-title">놀담</h2>
+      <p class="menu-sub">주말 브런치 · 키즈 · 커피</p>
+    </header>
+
+    <div class="menu-grid">
+      <section class="msec">
+        <header><h3>브런치</h3><span class="en">Brunch</span></header>
+        <ul class="items">
+          <li class="item">
+            <span><span class="item-name">리코타 팬케이크<span class="tag">SIGNATURE</span></span><span class="item-desc">두툼한 리코타 팬케이크, 제철 과일, 메이플 버터</span></span>
+            <span class="item-price">₩16,000</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">에그 베네딕트<span class="tag">SIGNATURE</span></span><span class="item-desc">잉글리시 머핀, 수란, 홀랜다이즈, 훈제 햄</span></span>
+            <span class="item-price">₩17,000</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">놀담 브런치 플래터</span><span class="item-desc">스크램블 에그, 수제 소시지, 구운 감자, 사워도우, 계절 샐러드</span></span>
+            <span class="item-price">₩19,000</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">아보카도 오픈 토스트</span><span class="item-desc">사워도우, 으깬 아보카도, 수란, 페타 치즈</span></span>
+            <span class="item-price">₩15,000</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="msec">
+        <header><h3>키즈</h3><span class="en">Kids</span></header>
+        <ul class="items">
+          <li class="item">
+            <span><span class="item-name">과일 미니 팬케이크<span class="tag">SIGNATURE</span></span><span class="item-desc">한입 크기 팬케이크에 제철 과일, 저당 시럽</span></span>
+            <span class="item-price">₩8,000</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">아이 브런치 세트</span><span class="item-desc">스크램블 에그, 미니 소시지, 구운 감자, 방울토마토</span></span>
+            <span class="item-price">₩9,000</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">순한 치즈 퀘사디아</span><span class="item-desc">부드러운 치즈, 자극 없는 순한 맛</span></span>
+            <span class="item-price">₩7,000</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">저당 요거트볼</span><span class="item-desc">플레인 요거트, 과일, 그래놀라</span></span>
+            <span class="item-price">₩6,000</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="msec">
+        <header><h3>커피 · 음료</h3><span class="en">Coffee &amp; Drink</span></header>
+        <ul class="items">
+          <li class="item"><span class="item-name">아메리카노</span><span class="item-price">₩4,500</span></li>
+          <li class="item"><span class="item-name">카페 라떼</span><span class="item-price">₩5,000</span></li>
+          <li class="item"><span class="item-name">카푸치노</span><span class="item-price">₩5,000</span></li>
+          <li class="item"><span class="item-name">바닐라 라떼</span><span class="item-price">₩5,500</span></li>
+          <li class="item"><span class="item-name">흑임자 곡물 라떼</span><span class="item-price">₩5,500</span></li>
+          <li class="item"><span><span class="item-name">유기농 우유 · 아이 주스</span><span class="item-desc">아이 음료</span></span><span class="item-price">₩3,500</span></li>
+          <li class="item"><span class="item-name">제철 과일 에이드</span><span class="item-price">₩6,000</span></li>
+          <li class="item"><span class="item-name">논카페인 티</span><span class="item-price">₩5,000</span></li>
+        </ul>
+      </section>
+
+      <section class="msec">
+        <header><h3>디저트</h3><span class="en">Dessert</span></header>
+        <ul class="items">
+          <li class="item">
+            <span><span class="item-name">바스크 치즈케이크</span><span class="item-desc">겉은 진하게, 속은 부드럽게</span></span>
+            <span class="item-price">₩7,500</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">통버터 스콘 &amp; 잼</span><span class="item-desc">매일 구운 스콘, 제철 수제잼</span></span>
+            <span class="item-price">₩5,500</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">아이 아이스크림 한 스쿱</span><span class="item-desc">저당 · 순한 우유맛</span></span>
+            <span class="item-price">₩3,500</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="msec play">
+        <header><h3>놀이존 이용</h3><span class="en">Play Zone</span></header>
+        <ul class="items">
+          <li class="item">
+            <span><span class="item-name">아이 1인 이용</span><span class="item-desc">시간 무제한 · 간식/음료 1개 포함</span></span>
+            <span class="item-price">₩15,000</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">형제 추가 1인</span><span class="item-desc">함께 온 둘째부터</span></span>
+            <span class="item-price">₩10,000</span>
+          </li>
+          <li class="item">
+            <span><span class="item-name">보호자 입장</span><span class="item-desc">동반 부모</span></span>
+            <span class="item-price">무료</span>
+          </li>
+        </ul>
+        <p class="note">실내화(양말) 착용 필수 · 영유아 존 / 유아 존 연령별 구분 운영 · 안전요원 상주</p>
+      </section>
+    </div>
+
+    <p class="menu-foot">모든 가격은 <b>초안</b>입니다 — 원가·상권에 따라 조정 예정.<br>놀이존 이용 시 브런치 10% 할인 (예시 정책)</p>
+  </section>
+
+  <footer class="foot">
+    <span class="mk">놀담 · Noldam</span> — 카페 컨셉 기획 · quest/week_5
+  </footer>
+</main>
+
+<script>
+  (function(){
+    var segs=document.querySelectorAll('.seg');
+    var views={board:document.getElementById('view-board'),menu:document.getElementById('view-menu')};
+    segs.forEach(function(btn){
+      btn.addEventListener('click',function(){
+        var v=btn.dataset.view;
+        segs.forEach(function(b){var on=b===btn;b.classList.toggle('active',on);b.setAttribute('aria-selected',on)});
+        Object.keys(views).forEach(function(k){views[k].setAttribute('data-active', String(k===v))});
+        window.scrollTo({top:0,behavior:'smooth'});
+      });
+    });
+  })();
+</script>

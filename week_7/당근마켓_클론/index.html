@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#FF6F0F" />
+  <title>당근마켓 클론 · 우리 동네 중고거래</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A5%95%3C/text%3E%3C/svg%3E" />
+
+  <!-- 한글 폰트 (실패해도 시스템 폰트로 자연스럽게 폴백) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.css" />
+
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script>
+    // Tailwind CDN 설정 — 당근마켓 팔레트 (SPEC 8절)
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            carrot: { DEFAULT: '#FF6F0F', dark: '#E8620C', light: '#FFF3EA', 50: '#FFF9F4' },
+            cool: { DEFAULT: '#868B94', 100: '#F2F3F6', 200: '#E5E8EB', 400: '#B0B8C1', 700: '#4E5968' },
+            ink: '#212124'
+          },
+          fontFamily: {
+            sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'Apple SD Gothic Neo',
+                   'Malgun Gothic', '맑은 고딕', 'Noto Sans KR', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+
+  <!--
+    ⚠️ 모든 CDN 버전 고정 필수.
+    @babel/standalone 무버전 URL 은 현재 Babel 8 을 서빙하는데, Babel 8 은
+    type="text/babel" 인라인/외부 JSX 변환 방식이 바뀌어 화면이 통째로 백지가 된다.
+    이 저장소에서 이미 두 번 겪은 문제이므로 7.26.4 로 못박는다.
+  -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: #EDEEF0;
+      color: #212124;
+      /* 한글 줄바꿈 (SPEC 8절) */
+      word-break: keep-all;
+      overflow-wrap: anywhere;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* 스크롤바 숨김 (가로 스크롤 칩/캐러셀용) */
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    .toast-in { animation: toastIn .18s ease-out; }
+
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .fade-up { animation: fadeUp .22s ease-out; }
+
+    @keyframes sheetUp { from { transform: translateY(100%); } to { transform: none; } }
+    .sheet-up { animation: sheetUp .22s cubic-bezier(.2,.8,.2,1); }
+
+    @keyframes skel { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+    .skel { animation: skel 1.2s ease-in-out infinite; }
+
+    /* 내 동네 범위 슬라이더 */
+    input[type=range].carrot-range {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 6px; border-radius: 9999px; background: #E5E8EB; outline: none;
+    }
+    input[type=range].carrot-range::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 26px; height: 26px; border-radius: 50%;
+      background: #fff; border: 4px solid #FF6F0F; cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,.18);
+    }
+    input[type=range].carrot-range::-moz-range-thumb {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: #fff; border: 4px solid #FF6F0F; cursor: pointer;
+    }
+
+    textarea { resize: none; }
+    .no-spin::-webkit-outer-spin-button, .no-spin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <!-- React 마운트 전 부트 화면 (client.js 가 렌더되면 대체된다) -->
+    <div id="boot-screen" style="height:100vh;display:flex;align-items:center;justify-content:center;background:#fff;">
+      <div style="text-align:center;font-family:Pretendard,'Malgun Gothic',sans-serif;">
+        <div style="font-size:44px;line-height:1;">🥕</div>
+        <p style="margin-top:12px;color:#868B94;font-size:14px;">당근마켓을 불러오는 중…</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="text/babel" src="client.js" data-presets="react"></script>
+
+  <script>
+    // 백지 화면 진단용: 10초 안에 React 가 마운트되지 않으면 원인을 표시한다.
+    setTimeout(function () {
+      if (window.__CARROT_MOUNTED__) return;
+      var el = document.getElementById('boot-screen');
+      if (!el) return;
+      var why = [];
+      if (!window.React) why.push('React CDN 로드 실패');
+      if (!window.Babel) why.push('Babel CDN 로드 실패');
+      if (window.Babel && window.Babel.version && window.Babel.version.indexOf('7.') !== 0) {
+        why.push('Babel 버전이 7.x 가 아님 (' + window.Babel.version + ')');
+      }
+      if (!why.length) why.push('client.js 실행 중 오류 — 브라우저 콘솔을 확인하세요');
+      el.innerHTML =
+        '<div style="max-width:340px;text-align:center;font-family:Pretendard,sans-serif;padding:24px">' +
+        '<div style="font-size:40px">🥕</div>' +
+        '<p style="margin-top:12px;font-weight:700;color:#212124">앱을 불러오지 못했어요</p>' +
+        '<p style="margin-top:8px;font-size:13px;color:#868B94;line-height:1.6">' + why.join('<br>') + '</p>' +
+        '<p style="margin-top:12px;font-size:12px;color:#B0B8C1">file:// 로 직접 열면 동작하지 않습니다. 서버(포트 3007)로 접속하세요.</p>' +
+        '</div>';
+    }, 10000);
+  </script>
+</body>
+</html>

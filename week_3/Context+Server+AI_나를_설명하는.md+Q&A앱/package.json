@@ -1,0 +1,16 @@
+{
+  "name": "about-me-qna-app",
+  "version": "1.0.0",
+  "description": "나를 설명하는 Q&A 앱 — about-me.md(류건우 프로필)를 컨텍스트로 OpenAI에 질문하면 류건우에 대해 무엇이든 한국어로 답해 주는 Express 백엔드 + 단일 index.html 프론트",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "license": "MIT"
+}

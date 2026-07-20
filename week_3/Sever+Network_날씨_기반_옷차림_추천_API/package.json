@@ -1,0 +1,16 @@
+{
+  "name": "weather-clothing-recommender",
+  "version": "1.0.0",
+  "description": "날씨 기반 옷차림 추천 API — OpenWeatherMap을 서버에서 호출하고 위치를 자동 감지하는 Express 백엔드 + 바닐라 JS 프론트",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "license": "MIT"
+}

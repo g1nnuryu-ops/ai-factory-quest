@@ -1,0 +1,7 @@
+- [AskUserQuestion 도구 없음](no-askuserquestion-tool.md) — 이 환경엔 해당 도구가 없음. 질문은 최종 메시지로 반환 → 부모가 SendMessage 로 답을 회신. 추측으로 MISSION 쓰지 말 것
+- [사용자 프로필: 퀘스트 학습자](user-quest-learner.md) — KDT 주차별 퀘스트, React CDN 단일파일 / Node+Supabase / 외부API 모두 경험. 아이 2명(3~7세). 리스크는 난이도가 아니라 범위
+- [스코핑 전에 기존 구현부터 찾아라](check-existing-before-scoping.md) — "만들고 싶다"는 앱이 이미 저장소에 있었던 적 있음. 질문을 "왜 새로 만드나"로 바꿔야 미션이 복제가 아닌 개선이 됨
+- [RAPA 증서앱은 이미 존재·배포됨](rapa-cert-app-already-exists.md) — 증서 5종+명단자동조회+시트DB+자동채번 완비. 약점=일괄발급 없음/시트DB/취약한 채번
+- [HRD-Net API 사실관계](hrdnet-api-facts.md) — `_4.jsp`(기관전용)는 훈련생 이름·생년월일·출결·수료상태를 실제로 반환함. "PII 없음"이라는 메인세션 메모는 틀림(라이브 검증)
+- [Tesla Fleet API 사실관계](tesla-fleet-api-facts.md) — 내비 목적지 전송(`navigation_request`)만은 **virtual key 서명 불필요한 REST 예외**. 한국=NA리전, 월 $10 무료. 단순 전송앱은 이미 존재
+- [한국 장소 데이터 API](korea-place-data-apis.md) — **카카오·네이버는 평점도 영업시간도 안 준다.** 그 둘을 주는 합법 소스는 Google Places뿐(한국 정상 동작). 실행형 앱에선 LLM에 장소 생성 금지

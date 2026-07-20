@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>💰 SHOW ME THE 부가세 - 부가가치세 계산기</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React + ReactDOM + Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Google Fonts: Black Han Sans (display) + Bebas Neue + Anton -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --gold: #ffd60a;
+      --gold-bright: #ffe44d;
+      --magenta: #ff1e8e;
+      --cyan: #00f0ff;
+    }
+
+    html, body { background: #0a0a0a; }
+
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .font-display { font-family: 'Black Han Sans', sans-serif; }
+    .font-anton   { font-family: 'Anton', sans-serif; }
+    .font-bebas   { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.04em; }
+
+    /* Spotlight / stage background */
+    .stage-bg {
+      background:
+        radial-gradient(circle at 20% -10%, rgba(255,30,142,0.18), transparent 45%),
+        radial-gradient(circle at 85% 0%, rgba(255,214,10,0.18), transparent 45%),
+        radial-gradient(circle at 50% 120%, rgba(0,240,255,0.10), transparent 50%),
+        #0a0a0a;
+      position: relative;
+      overflow-x: hidden;
+    }
+    .stage-bg::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 44px 44px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Neon text glows */
+    .glow-gold {
+      color: var(--gold);
+      text-shadow: 0 0 6px rgba(255,214,10,0.7), 0 0 22px rgba(255,214,10,0.5), 0 0 44px rgba(255,214,10,0.3);
+    }
+    .glow-magenta {
+      color: var(--magenta);
+      text-shadow: 0 0 6px rgba(255,30,142,0.8), 0 0 22px rgba(255,30,142,0.5);
+    }
+    .glow-cyan {
+      color: var(--cyan);
+      text-shadow: 0 0 6px rgba(0,240,255,0.8), 0 0 22px rgba(0,240,255,0.5);
+    }
+    .glow-white {
+      text-shadow: 0 0 8px rgba(255,255,255,0.55);
+    }
+
+    .box-glow-gold   { box-shadow: 0 0 0 2px var(--gold), 0 0 22px rgba(255,214,10,0.45); }
+    .box-glow-magenta{ box-shadow: 0 0 0 2px var(--magenta), 0 0 22px rgba(255,30,142,0.45); }
+
+    /* Diagonal "stage tape" stripe */
+    .tape {
+      background: repeating-linear-gradient(45deg, #ffd60a 0 18px, #0a0a0a 18px 36px);
+    }
+
+    /* Animated flicker for the headline */
+    @keyframes flicker {
+      0%, 92%, 100% { opacity: 1; }
+      93% { opacity: 0.45; }
+      95% { opacity: 1; }
+      97% { opacity: 0.7; }
+    }
+    .flicker { animation: flicker 4.5s infinite; }
+
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 0 2px var(--gold), 0 0 18px rgba(255,214,10,0.4); }
+      50% { box-shadow: 0 0 0 2px var(--gold-bright), 0 0 34px rgba(255,214,10,0.75); }
+    }
+    .pulse-glow { animation: pulseGlow 2.4s ease-in-out infinite; }
+
+    @keyframes floatUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .float-up { animation: floatUp 0.45s ease-out both; }
+
+    /* Hide number input spinners */
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+
+    ::selection { background: var(--magenta); color: #fff; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // ========================================
+    // React Hooks
+    // ========================================
+    const { useState, useMemo, useCallback } = React;
+
+    // ========================================
+    // Utils
+    // ========================================
+    const KRW = (n) => {
+      if (n === null || n === undefined || isNaN(n)) return "0";
+      const rounded = Math.round(n);
+      return rounded.toLocaleString("ko-KR");
+    };
+
+    // Parse a string of digits/commas into a number
+    const parseAmount = (str) => {
+      const cleaned = String(str).replace(/[^0-9]/g, "");
+      if (cleaned === "") return 0;
+      return parseInt(cleaned, 10);
+    };
+
+    const formatInput = (str) => {
+      const num = parseAmount(str);
+      return num === 0 && str.replace(/[^0-9]/g, "") === "" ? "" : num.toLocaleString("ko-KR");
+    };
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function NeonButton({ active, children, onClick, color = "gold", className = "" }) {
+      const palette = {
+        gold:    active ? "bg-yellow-400 text-black box-glow-gold" : "bg-black/40 text-yellow-300 border-2 border-yellow-400/40",
+        magenta: active ? "text-white box-glow-magenta" : "bg-black/40 border-2 border-pink-500/40",
+      };
+      const style = color === "magenta" && active ? { background: "var(--magenta)" } : {};
+      return (
+        <button
+          type="button"
+          onClick={onClick}
+          style={style}
+          className={`font-display tracking-wide transition-all duration-150 active:scale-95 rounded-xl ${palette[color]} ${active ? "" : "hover:border-yellow-400 hover:text-yellow-200"} ${className}`}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function MoneyInput({ label, value, onChange, accent = "gold", emoji }) {
+      const accentCls = accent === "gold" ? "focus-within:box-glow-gold border-yellow-400/40" : "focus-within:box-glow-magenta border-pink-500/40";
+      const textCls = accent === "gold" ? "glow-gold" : "glow-magenta";
+      return (
+        <div className="w-full">
+          <label className="font-display text-sm sm:text-base text-gray-300 tracking-wide flex items-center gap-2 mb-2">
+            <span>{emoji}</span>{label}
+          </label>
+          <div className={`flex items-center bg-black/70 border-2 ${accentCls} rounded-2xl px-4 sm:px-5 py-3 sm:py-4 transition-all`}>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder="0"
+              className={`flex-1 min-w-0 bg-transparent outline-none font-anton text-3xl sm:text-4xl text-right ${textCls} placeholder-gray-700`}
+            />
+            <span className="font-bebas text-2xl sm:text-3xl text-gray-400 ml-3 select-none">원</span>
+          </div>
+        </div>
+      );
+    }
+
+    function ResultRow({ label, amount, big = false, accent = "white", delay = 0 }) {
+      const accentCls =
+        accent === "gold" ? "glow-gold" :
+        accent === "magenta" ? "glow-magenta" :
+        accent === "cyan" ? "glow-cyan" : "text-white glow-white";
+      return (
+        <div
+          className={`float-up flex items-end justify-between gap-3 ${big ? "pt-4 mt-2 border-t-2 border-dashed border-yellow-400/30" : ""}`}
+          style={{ animationDelay: delay + "ms" }}
+        >
+          <span className={`font-display tracking-wide ${big ? "text-lg sm:text-2xl text-yellow-200" : "text-sm sm:text-base text-gray-400"}`}>
+            {label}
+          </span>
+          <span className={`font-anton leading-none ${big ? "text-4xl sm:text-6xl" : "text-2xl sm:text-3xl"} ${accentCls}`}>
+            {amount}<span className="font-bebas text-base sm:text-xl text-gray-500 ml-1">원</span>
+          </span>
+        </div>
+      );
+    }
+
+    function Chip({ active, children, onClick }) {
+      return (
+        <button
+          type="button"
+          onClick={onClick}
+          className={`font-bebas text-lg sm:text-xl px-3 sm:px-4 py-1.5 rounded-full transition-all active:scale-90 border-2 ${
+            active
+              ? "bg-yellow-400 text-black border-yellow-400 box-glow-gold"
+              : "bg-black/50 text-yellow-300/80 border-yellow-400/30 hover:border-yellow-400"
+          }`}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    // ========================================
+    // 🧩 Header
+    // ========================================
+    function StageHeader() {
+      return (
+        <header className="relative z-10 text-center pt-8 sm:pt-12 pb-2 px-4">
+          <div className="tape h-2 w-40 mx-auto mb-5 rounded-full opacity-80" />
+          <p className="font-bebas text-cyan-300 glow-cyan text-xl sm:text-2xl tracking-[0.3em] mb-1">SHOW ME THE</p>
+          <h1 className="font-display flicker glow-gold text-5xl sm:text-7xl leading-none">
+            부가세 💰🔥
+          </h1>
+          <p className="font-display text-gray-400 text-base sm:text-lg mt-3 tracking-wide">
+            대한민국 부가가치세 계산기 — 돈 계산은 빡세게
+          </p>
+        </header>
+      );
+    }
+
+    // ========================================
+    // 📄 Calculator Page
+    // ========================================
+    function VATCalculator() {
+      const [mode, setMode] = useState("add");        // "add" = 세금 추가, "extract" = 세금 포함
+      const [rate, setRate] = useState(10);            // % VAT rate
+      const [raw, setRaw] = useState("");              // raw input string
+
+      const amount = parseAmount(raw);
+      const r = rate / 100;
+
+      const result = useMemo(() => {
+        if (mode === "add") {
+          // input = 공급가액
+          const supply = amount;
+          const vat = supply * r;
+          const total = supply + vat;
+          return { supply, vat, total };
+        } else {
+          // input = 합계금액 (VAT 포함) → 역산
+          const total = amount;
+          const supply = total / (1 + r);
+          const vat = total - supply;
+          return { supply, vat, total };
+        }
+      }, [amount, r, mode]);
+
+      const handleInput = useCallback((val) => {
+        setRaw(formatInput(val));
+      }, []);
+
+      const presets = [10, 0, 5, 7];
+      const hasValue = amount > 0;
+
+      const inputLabel = mode === "add" ? "공급가액 입력" : "합계금액 입력 (부가세 포함)";
+      const inputEmoji = mode === "add" ? "🎤" : "💸";
+      const inputAccent = mode === "add" ? "gold" : "magenta";
+
+      return (
+        <main className="relative z-10 max-w-2xl mx-auto px-4 sm:px-6 pb-16">
+
+          {/* Mode tabs */}
+          <div className="grid grid-cols-2 gap-3 mt-6 mb-6">
+            <NeonButton active={mode === "add"} onClick={() => setMode("add")} color="gold" className="py-4 text-lg sm:text-xl">
+              ➕ 세금 추가
+            </NeonButton>
+            <NeonButton active={mode === "extract"} onClick={() => setMode("extract")} color="magenta" className="py-4 text-lg sm:text-xl">
+              🧾 세금 포함
+            </NeonButton>
+          </div>
+
+          <p className="text-center font-display text-gray-500 text-xs sm:text-sm mb-6 -mt-2">
+            {mode === "add"
+              ? "공급가액에 부가세를 얹어서 합계 뽑기"
+              : "부가세 포함 금액에서 공급가액·부가세 빼내기"}
+          </p>
+
+          {/* Rate presets */}
+          <div className="bg-black/50 border-2 border-yellow-400/20 rounded-2xl p-4 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-display text-gray-300 text-sm sm:text-base tracking-wide">🔥 부가세율</span>
+              <span className="font-anton text-3xl sm:text-4xl glow-gold leading-none">{rate}<span className="text-xl">%</span></span>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {presets.map((p) => (
+                <Chip key={p} active={rate === p} onClick={() => setRate(p)}>{p}%</Chip>
+              ))}
+            </div>
+            <input
+              type="range"
+              min="0" max="25" step="1"
+              value={rate}
+              onChange={(e) => setRate(parseInt(e.target.value, 10))}
+              className="w-full accent-yellow-400 cursor-pointer"
+              aria-label="부가세율 슬라이더"
+            />
+          </div>
+
+          {/* Money input */}
+          <div className="mb-7">
+            <MoneyInput
+              label={inputLabel}
+              value={raw}
+              onChange={handleInput}
+              accent={inputAccent}
+              emoji={inputEmoji}
+            />
+          </div>
+
+          {/* Results */}
+          <section
+            className={`rounded-3xl p-5 sm:p-7 bg-gradient-to-b from-zinc-900/90 to-black border-2 ${hasValue ? "pulse-glow" : "border-yellow-400/20"}`}
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <span className="tape h-1.5 flex-1 rounded-full opacity-70" />
+              <span className="font-bebas text-yellow-300 glow-gold text-xl tracking-widest">결과</span>
+              <span className="tape h-1.5 flex-1 rounded-full opacity-70" />
+            </div>
+
+            <div className="space-y-3">
+              <ResultRow label="공급가액" amount={KRW(result.supply)} accent="cyan" delay={0} />
+              <ResultRow label={`부가세 (${rate}%)`} amount={KRW(result.vat)} accent="magenta" delay={70} />
+              <ResultRow label="합계금액" amount={KRW(result.total)} accent="gold" big delay={140} />
+            </div>
+
+            {!hasValue && (
+              <p className="text-center font-display text-gray-600 text-sm mt-5">
+                위에 금액을 찍어봐 💰
+              </p>
+            )}
+          </section>
+
+          {/* Footer note */}
+          <p className="text-center font-display text-gray-600 text-[11px] sm:text-xs mt-8 leading-relaxed">
+            * 부가세는 원 단위 반올림으로 표시됩니다. 실제 세금계산서 발행 시<br className="hidden sm:block"/>
+            세법상 절사·반올림 기준에 따라 차이가 날 수 있습니다.
+          </p>
+        </main>
+      );
+    }
+
+    // ========================================
+    // 🚀 App
+    // ========================================
+    function App() {
+      return (
+        <div className="stage-bg min-h-screen w-full">
+          <StageHeader />
+          <VATCalculator />
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

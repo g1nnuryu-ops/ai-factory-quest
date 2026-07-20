@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>나만의 ChatGPT · 고용노동부 교육훈련 상담관</title>
+
+  <!-- Tailwind CSS (CDN, 빌드 없음) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 + ReactDOM (개발용 UMD 빌드) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Babel standalone (브라우저에서 JSX 변환) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body { background-color: #0b0f19; }
+
+    /* 말풍선 등장 */
+    @keyframes bubbleIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .bubble-in { animation: bubbleIn 0.28s ease-out; }
+
+    /* 타이핑 인디케이터 점 3개 */
+    @keyframes typingBounce {
+      0%, 60%, 100% { transform: translateY(0);    opacity: 0.45; }
+      30%           { transform: translateY(-5px); opacity: 1; }
+    }
+    .typing-dot { animation: typingBounce 1.2s infinite ease-in-out; }
+    .typing-dot:nth-child(2) { animation-delay: 0.18s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.36s; }
+
+    /* 환영 화면 페이드업 */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeUp 0.5s ease-out; }
+
+    /* 슬림 스크롤바 */
+    .chat-scroll::-webkit-scrollbar { width: 8px; }
+    .chat-scroll::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.25);
+      border-radius: 9999px;
+    }
+    .chat-scroll::-webkit-scrollbar-track { background: transparent; }
+
+    textarea { scrollbar-width: thin; }
+  </style>
+</head>
+<body class="text-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ========================================
+    // 상수 / 헬퍼
+    // ========================================
+
+    // 같은 출처(origin)에서 서빙되므로 상대경로로 호출 (포트/절대 URL 하드코딩 금지)
+    const API_URL = '/api/chat';
+
+    // 페르소나 소개 (UI 표시용 — 실제 system 프롬프트는 서버가 주입한다)
+    const PERSONA = {
+      avatar: '🧑‍💼',
+      name: '고용노동부 교육훈련 상담관',
+      subtitle: 'MBTI ESTJ · 직업능력개발 전문',
+    };
+
+    // 환영 화면 예시 질문 칩
+    const SAMPLE_QUESTIONS = [
+      '국민내일배움카드 신청 방법',
+      'K-디지털 트레이닝이 뭔가요?',
+      '실업급여 받으면서 들을 수 있는 훈련은?',
+    ];
+
+    // 안정적인 React key용 모듈 스코프 카운터 (uuid CDN 없이)
+    let idSeq = 0;
+    const newId = () => `m${++idSeq}`;
+
+    const nowTime = () =>
+      new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+
+    // ========================================
+    // 🎨 디자인 시스템 / 아이콘
+    // ========================================
+
+    function SendIcon() {
+      return (
+        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <line x1="22" y1="2" x2="11" y2="13" />
+          <polygon points="22 2 15 22 11 13 2 9 22 2" />
+        </svg>
+      );
+    }
+
+    // 좌측 상담관 아바타 (말풍선 옆)
+    function Avatar({ className = '' }) {
+      return (
+        <div
+          className={
+            'flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-full ' +
+            'bg-gradient-to-br from-indigo-500 to-blue-600 text-lg shadow-md ring-1 ring-white/10 ' +
+            className
+          }
+          aria-hidden="true"
+        >
+          {PERSONA.avatar}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 메시지 말풍선
+    // ========================================
+
+    function MessageBubble({ msg }) {
+      const isUser = msg.role === 'user';
+      const isError = msg.role === 'error';
+
+      // assistant: 좌측 / user: 우측
+      const rowClass = isUser ? 'flex-row-reverse' : 'flex-row';
+
+      // 말풍선 색상
+      let bubbleClass;
+      if (isUser) {
+        bubbleClass =
+          'bg-gradient-to-br from-indigo-600 to-blue-600 text-white rounded-2xl rounded-br-md';
+      } else if (isError) {
+        bubbleClass =
+          'bg-rose-950/70 text-rose-100 border border-rose-500/40 rounded-2xl rounded-bl-md';
+      } else {
+        bubbleClass =
+          'bg-slate-800/80 text-slate-100 border border-white/5 rounded-2xl rounded-bl-md';
+      }
+
+      return (
+        <div className={'bubble-in flex w-full items-end gap-2.5 ' + rowClass}>
+          {/* assistant/error 만 아바타 표시 */}
+          {!isUser && (
+            isError
+              ? <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-lg ring-1 ring-rose-500/30" aria-hidden="true">⚠️</div>
+              : <Avatar />
+          )}
+
+          <div className={'flex max-w-[80%] flex-col sm:max-w-[72%] ' + (isUser ? 'items-end' : 'items-start')}>
+            <div
+              className={
+                'whitespace-pre-wrap break-words px-4 py-2.5 text-[15px] leading-relaxed shadow-md ' +
+                bubbleClass
+              }
+            >
+              {msg.text}
+            </div>
+            <span className="mt-1 px-1 text-[11px] text-slate-500">{msg.time}</span>
+          </div>
+        </div>
+      );
+    }
+
+    // 타이핑 인디케이터 (상담관이 입력 중)
+    function TypingBubble() {
+      return (
+        <div className="bubble-in flex w-full items-end gap-2.5">
+          <Avatar />
+          <div className="flex flex-col items-start">
+            <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-md border border-white/5 bg-slate-800/80 px-4 py-3.5 shadow-md">
+              <span className="typing-dot h-2 w-2 rounded-full bg-slate-400" />
+              <span className="typing-dot h-2 w-2 rounded-full bg-slate-400" />
+              <span className="typing-dot h-2 w-2 rounded-full bg-slate-400" />
+            </div>
+            <span className="mt-1 px-1 text-[11px] text-slate-500">상담관이 입력 중…</span>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 환영(빈) 화면
+    // ========================================
+
+    function WelcomeScreen({ onPickQuestion, disabled }) {
+      return (
+        <div className="fade-up mx-auto flex max-w-xl flex-col items-center px-2 py-10 text-center sm:py-16">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 text-4xl shadow-lg ring-1 ring-white/10">
+            {PERSONA.avatar}
+          </div>
+          <h2 className="mt-5 text-xl font-bold text-slate-100 sm:text-2xl">
+            안녕하세요, {PERSONA.name}입니다.
+          </h2>
+          <p className="mt-3 text-sm leading-relaxed text-slate-400 sm:text-base">
+            저는 MBTI <b className="text-slate-200">ESTJ</b> 성향의 직업능력개발·교육훈련 전문 상담관입니다.
+            <br />
+            국민내일배움카드, K-디지털 트레이닝, 실업급여 연계 훈련 등
+            <br className="hidden sm:block" />
+            직업훈련에 관한 무엇이든 명확하고 실용적으로 안내해 드리겠습니다.
+          </p>
+
+          <p className="mt-8 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            이런 질문으로 시작해 보세요
+          </p>
+          <div className="mt-3 flex w-full flex-col gap-2.5">
+            {SAMPLE_QUESTIONS.map((q) => (
+              <button
+                key={q}
+                type="button"
+                disabled={disabled}
+                onClick={() => onPickQuestion(q)}
+                className={
+                  'group flex items-center justify-between gap-3 rounded-xl border border-white/10 ' +
+                  'bg-slate-800/60 px-4 py-3 text-left text-sm text-slate-200 transition ' +
+                  'hover:border-indigo-400/50 hover:bg-slate-800 ' +
+                  'disabled:cursor-not-allowed disabled:opacity-50'
+                }
+              >
+                <span>{q}</span>
+                <span className="text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-indigo-300">→</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 상단 프로필 헤더
+    // ========================================
+
+    function Header() {
+      return (
+        <header className="flex items-center gap-3 border-b border-white/10 bg-slate-900/80 px-4 py-3 backdrop-blur-md sm:px-6">
+          <div className="relative">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-2xl shadow-md ring-1 ring-white/10">
+              {PERSONA.avatar}
+            </div>
+            {/* 온라인 상태 점 */}
+            <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-slate-900 bg-emerald-400" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="truncate text-base font-bold leading-tight text-slate-100 sm:text-lg">
+              {PERSONA.name}
+            </h1>
+            <p className="truncate text-xs text-slate-400 sm:text-sm">
+              {PERSONA.subtitle}
+            </p>
+          </div>
+        </header>
+      );
+    }
+
+    // ========================================
+    // 🚀 App
+    // ========================================
+
+    function App() {
+      // messages: [{ id, role: 'user' | 'assistant' | 'error', text, time }]
+      // role 'error'는 화면 표시 전용 — API 전송 시 제외한다.
+      const [messages, setMessages] = useState([]);
+      const [input, setInput] = useState('');
+      const [isSending, setIsSending] = useState(false);
+
+      const scrollRef = useRef(null);   // 메시지 스크롤 컨테이너
+      const textareaRef = useRef(null); // 자동 높이 조절용
+      const abortRef = useRef(null);    // 언마운트 시 진행 중 요청 취소
+
+      // 새 메시지 / 타이핑 시 항상 하단으로 스크롤 (타이핑 점까지 보이도록)
+      useEffect(() => {
+        const el = scrollRef.current;
+        if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      }, [messages, isSending]);
+
+      // textarea 자동 높이 (최대 140px)
+      useEffect(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 140) + 'px';
+      }, [input]);
+
+      // 언마운트 시 진행 중 fetch 정리
+      useEffect(() => {
+        return () => {
+          if (abortRef.current) abortRef.current.abort();
+        };
+      }, []);
+
+      // 핵심: 메시지 전송 → /api/chat 호출 → 응답 처리
+      const sendMessage = useCallback(async (rawText) => {
+        const text = rawText.trim();
+        if (!text || isSending) return;
+
+        // ① 내 메시지를 즉시 화면에 추가 + 입력창 비우기
+        const userMsg = { id: newId(), role: 'user', text, time: nowTime() };
+
+        // 서버에 보낼 대화 묶음 계산 (이전 messages + 방금 입력).
+        // error 말풍선은 계약(role: user|assistant)에 없으므로 제외하고,
+        // content 필드명으로 매핑한다. system은 절대 포함하지 않는다.
+        const outgoing = [...messages, userMsg]
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .map((m) => ({ role: m.role, content: m.text }));
+
+        setMessages((prev) => [...prev, userMsg]);
+        setInput('');
+        setIsSending(true);
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        try {
+          const res = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: outgoing }),
+            signal: controller.signal,
+          });
+
+          // 응답 JSON 파싱 (실패해도 앱이 죽지 않게 방어)
+          const data = await res.json().catch(() => null);
+
+          if (!res.ok || !data || data.success !== true) {
+            const msg =
+              (data && data.message) ||
+              '죄송합니다. 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요.';
+            throw new Error(msg);
+          }
+
+          const replyText =
+            typeof data.reply === 'string' && data.reply.trim()
+              ? data.reply
+              : '죄송합니다. 답변 내용이 비어 있어요. 다시 한 번 질문해 주시겠어요?';
+
+          setMessages((prev) => [
+            ...prev,
+            { id: newId(), role: 'assistant', text: replyText, time: nowTime() },
+          ]);
+        } catch (err) {
+          // AbortError(언마운트)는 사용자에게 알리지 않는다.
+          if (err.name === 'AbortError') return;
+
+          // fetch 자체 실패(TypeError)는 네트워크/서버 미응답으로 처리
+          const errText =
+            err instanceof TypeError
+              ? '서버에 연결할 수 없어요. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.'
+              : err.message;
+
+          setMessages((prev) => [
+            ...prev,
+            { id: newId(), role: 'error', text: errText, time: nowTime() },
+          ]);
+        } finally {
+          setIsSending(false);
+          abortRef.current = null;
+        }
+      }, [messages, isSending]);
+
+      // 입력창 전송 핸들러
+      const handleSubmit = () => sendMessage(input);
+
+      // Enter=전송, Shift+Enter=줄바꿈
+      const handleKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleSubmit();
+        }
+      };
+
+      const isEmpty = messages.length === 0;
+
+      return (
+        <div className="flex h-[100dvh] flex-col">
+          {/* 가운데 정렬 컬럼 (데스크톱에서 폭 제한) */}
+          <div className="mx-auto flex h-full w-full max-w-3xl flex-col">
+
+            <Header />
+
+            {/* 대화 영역 */}
+            <main
+              ref={scrollRef}
+              className="chat-scroll flex-1 overflow-y-auto px-3 py-5 sm:px-5"
+            >
+              {isEmpty ? (
+                <WelcomeScreen onPickQuestion={sendMessage} disabled={isSending} />
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {messages.map((m) => (
+                    <MessageBubble key={m.id} msg={m} />
+                  ))}
+                  {isSending && <TypingBubble />}
+                </div>
+              )}
+            </main>
+
+            {/* 입력 영역 (하단 고정) */}
+            <footer className="border-t border-white/10 bg-slate-900/80 px-3 py-3 backdrop-blur-md sm:px-5">
+              <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-slate-800/70 px-3 py-2 focus-within:border-indigo-400/60 focus-within:ring-2 focus-within:ring-indigo-500/20">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  disabled={isSending}
+                  rows={1}
+                  placeholder={isSending ? '상담관이 답변 중이에요…' : '메시지를 입력하세요  (Enter 전송 · Shift+Enter 줄바꿈)'}
+                  aria-label="메시지 입력"
+                  className={
+                    'max-h-[140px] flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-relaxed ' +
+                    'text-slate-100 placeholder-slate-500 outline-none ' +
+                    'disabled:cursor-not-allowed disabled:opacity-60'
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={isSending || !input.trim()}
+                  aria-label="전송"
+                  className={
+                    'mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white transition ' +
+                    'bg-indigo-600 hover:bg-indigo-500 ' +
+                    'disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400'
+                  }
+                >
+                  <SendIcon />
+                </button>
+              </div>
+              <p className="mt-2 text-center text-[11px] text-slate-600">
+                답변은 참고용이며, 정확한 신청 요건은 고용노동부·HRD-Net 공식 안내를 확인하세요.
+              </p>
+            </footer>
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

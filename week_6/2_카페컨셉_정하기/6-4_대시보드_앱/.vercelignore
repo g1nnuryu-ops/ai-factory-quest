@@ -1,0 +1,8 @@
+# 런타임에 불필요한 파일은 배포 번들에서 제외.
+node_modules
+.env
+.env.*
+.vercel
+# 문서·스크린샷은 서버가 서빙하지 않음(index.html 은 자체 포함).
+*.png
+README.md

@@ -1,0 +1,16 @@
+{
+  "name": "ai-dream-interpreter",
+  "version": "1.0.0",
+  "description": "AI 꿈해몽 — 어젯밤 꾼 꿈을 입력하면 '서울에 자가 있는 김부장' 페르소나의 OpenAI가 길몽/흉몽을 판정하고 현실 조언을 해 주는 Express 백엔드 + 단일 index.html 프론트",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "license": "MIT"
+}

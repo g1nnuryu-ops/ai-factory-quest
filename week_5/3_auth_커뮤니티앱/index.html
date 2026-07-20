@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>커뮤니티 게시판 (로그인)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 UMD (개발 빌드) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <!-- ⚠️ Babel 은 반드시 7.x 로 고정한다. 미고정(@babel/standalone) 시 최신 8.x 로
+       올라가 type="text/babel" 인라인 JSX 변환이 통째로 깨진다. -->
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <style>
+    /* Tailwind으로 표현하기 어려운 진입/등장 애니메이션만 별도 정의 */
+    @keyframes itemIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .item-in { animation: itemIn 0.18s ease-out; }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .toast-in { animation: toastIn 0.22s ease-out; }
+  </style>
+</head>
+<body class="bg-slate-100">
+  <div id="root"></div>
+
+  <!-- React 앱 본체는 client.js 에 있으며, Babel 이 브라우저에서 JSX 를 변환합니다. -->
+  <script type="text/babel" src="client.js" data-presets="react"></script>
+</body>
+</html>

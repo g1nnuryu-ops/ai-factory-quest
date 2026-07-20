@@ -1,0 +1,13 @@
+{
+  "name": "anonymous-board",
+  "version": "1.0.0",
+  "description": "익명 고민/칭찬/응원/건의 게시판 — Node.js + Supabase Postgres",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
+}

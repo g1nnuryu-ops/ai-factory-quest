@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>놀담 · Noldam — A4 메뉴판</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎠</text></svg>">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+
+  :root{
+    --cream:#F6F1E7;
+    --card:#FCFAF4;
+    --sage:#7C8B6B;
+    --sage-deep:#66755A;
+    --sage-tint:#CBD3BC;      /* 세이지 계열 소프트 틴트 */
+    --apricot:#E39A5C;
+    --apricot-deep:#CE8038;
+    --apricot-tint:#F3CBA2;   /* 애프리콧 계열 소프트 틴트 */
+    --apricot-pale:#F7E7D2;
+    --ink:#3D3A34;
+    --muted:#9C9484;
+    --line:#E4DCCB;
+    --serif:'Gowun Batang','Nanum Myeongjo','Malgun Gothic',serif;
+    --sans:'Noto Sans KR','Malgun Gothic',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{background:var(--cream);}
+  body{font-family:var(--sans);color:var(--ink);word-break:keep-all;}
+
+  /* ===== A4 PAGE (210:297) — 1240×1754px → @2x = 2480×3508 = A4 300dpi ===== */
+  .board{
+    width:1240px;height:1754px;overflow:hidden;
+    background:var(--cream);
+    padding:52px 60px 46px;
+    display:flex;flex-direction:column;
+  }
+
+  /* ---------- Header ---------- */
+  .head{text-align:center;padding-bottom:20px;border-bottom:1.5px solid var(--sage);}
+  .kicker{font-size:14px;letter-spacing:.58em;color:var(--apricot-deep);font-weight:500;margin-left:.58em;}
+  .brand{font-family:var(--serif);font-size:72px;font-weight:700;color:var(--sage-deep);line-height:1.02;margin-top:8px;}
+  .brand .en{font-size:28px;color:var(--apricot);font-weight:400;letter-spacing:.15em;vertical-align:middle;margin-left:14px;}
+  .slogan{font-family:var(--serif);font-size:21px;color:var(--ink);font-style:italic;margin-top:10px;}
+  .subtag{font-size:13.5px;color:var(--muted);margin-top:8px;letter-spacing:.05em;}
+
+  /* ---------- Signature HERO (놀이존) ---------- */
+  .hero{
+    margin-top:26px;
+    background:linear-gradient(135deg,#F5E7D2 0%,#F8F0E1 55%,#F4E4CE 100%);
+    border:1.5px solid var(--apricot);
+    border-radius:22px;
+    padding:24px 30px 26px;
+    display:flex;gap:30px;align-items:center;
+    box-shadow:0 10px 30px rgba(206,128,56,.10);
+  }
+  .hero-art{flex:0 0 468px;}
+  .hero-art svg{display:block;width:468px;height:auto;}
+  .hero-body{flex:1;min-width:0;padding-right:4px;}
+
+  .hero-badge-row{display:flex;align-items:center;gap:12px;}
+  .hero-badge{
+    display:inline-flex;align-items:center;gap:7px;
+    background:var(--apricot);color:#fff;
+    font-size:12px;font-weight:700;letter-spacing:.22em;
+    padding:6px 15px 6px 13px;border-radius:999px;
+    box-shadow:0 4px 12px rgba(206,128,56,.30);
+  }
+  .hero-badge .st{font-size:13px;line-height:1;}
+  .hero-en{font-size:12px;letter-spacing:.42em;color:var(--muted);font-weight:600;}
+
+  .hero-title{font-family:var(--serif);font-size:40px;font-weight:700;color:var(--sage-deep);margin-top:14px;line-height:1.1;}
+  .hero-emph{
+    font-family:var(--serif);font-size:17.5px;font-style:italic;color:var(--apricot-deep);
+    line-height:1.55;margin-top:12px;font-weight:700;
+  }
+  .hero-sub{font-size:13.5px;color:var(--sage-deep);margin-top:9px;line-height:1.5;font-weight:400;}
+
+  .hero-prices{margin-top:16px;border-top:1.5px dashed rgba(206,128,56,.35);padding-top:13px;}
+  .pz{display:flex;align-items:baseline;margin-bottom:9px;}
+  .pz:last-child{margin-bottom:0;}
+  .pz-name{font-size:15.5px;font-weight:500;color:var(--ink);white-space:nowrap;}
+  .pz-desc{font-size:12px;color:var(--muted);margin-left:8px;font-weight:300;}
+  .pz-dot{flex:1;border-bottom:1.5px dotted var(--line);margin:0 10px 5px;min-width:16px;}
+  .pz-price{font-size:17px;font-weight:700;color:var(--apricot-deep);white-space:nowrap;font-variant-numeric:tabular-nums;}
+  .pz-price.free{color:var(--sage-deep);}
+
+  /* ---------- Menu grid ---------- */
+  .menu{margin-top:28px;display:flex;gap:52px;flex:1;}
+  .mcol{flex:1;display:flex;flex-direction:column;}
+
+  .cat{margin-bottom:34px;}
+  .cat:last-child{margin-bottom:0;}
+  .cat-h{display:flex;align-items:baseline;gap:12px;margin-bottom:8px;}
+  .cat-no{font-family:var(--serif);font-size:16px;color:var(--apricot);font-weight:700;}
+  .cat-ko{font-family:var(--serif);font-size:26px;color:var(--sage-deep);font-weight:700;}
+  .cat-en{font-size:11px;letter-spacing:.32em;color:var(--muted);font-weight:500;margin-left:auto;}
+  .cat-note{font-size:12.5px;color:var(--muted);font-style:italic;margin:0 0 14px;}
+  .cat-rule{height:1.5px;background:var(--line);margin:0 0 15px;}
+
+  /* ---------- Item ---------- */
+  .item{display:flex;align-items:flex-end;margin-bottom:23px;}
+  .item:last-child{margin-bottom:0;}
+  .it-left{flex:1;min-width:0;}
+  .it-name{font-size:16.5px;font-weight:500;color:var(--ink);}
+  .it-name .hot{display:inline-block;background:var(--apricot);color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:1.5px 8px;border-radius:999px;margin-right:7px;vertical-align:middle;}
+  .it-desc{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.45;font-weight:300;}
+  .leader{border-bottom:1.5px dotted var(--line);margin:0 9px 6px;min-width:14px;flex:1;}
+  .it-price{font-size:16.5px;font-weight:700;color:var(--apricot-deep);white-space:nowrap;font-variant-numeric:tabular-nums;}
+  .it-price .sub{font-size:11.5px;color:var(--muted);font-weight:400;margin-left:6px;}
+
+  .callout{font-size:12.5px;color:var(--sage-deep);background:rgba(124,139,107,.12);border-radius:9px;padding:9px 13px;margin-top:14px;font-weight:400;}
+
+  /* ---------- Amenities info card ---------- */
+  .info{margin-top:24px;background:rgba(124,139,107,.10);border:1.5px solid rgba(124,139,107,.30);border-radius:15px;padding:17px 21px 18px;}
+  .info-h{font-family:var(--serif);font-size:19px;color:var(--sage-deep);font-weight:700;display:flex;align-items:baseline;gap:10px;margin-bottom:13px;}
+  .info-h span{font-size:10px;letter-spacing:.3em;color:var(--muted);font-weight:600;}
+  .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px 20px;}
+  .info-i{font-size:13px;color:var(--ink);font-weight:400;padding-left:17px;position:relative;line-height:1.4;}
+  .info-i::before{content:"";position:absolute;left:0;top:6px;width:7px;height:7px;border-radius:50%;background:var(--apricot);}
+
+  /* ---------- Footer ---------- */
+  .foot{margin-top:24px;padding-top:20px;border-top:1.5px solid var(--sage);display:flex;justify-content:space-between;align-items:flex-end;}
+  .foot-l .f-slogan{font-family:var(--serif);font-size:16px;color:var(--sage-deep);font-style:italic;}
+  .foot-l .f-icons{font-size:12px;color:var(--muted);margin-top:8px;}
+  .foot-l .f-note{font-size:11px;color:var(--muted);margin-top:6px;font-weight:300;}
+  .palette{display:flex;gap:9px;align-items:center;}
+  .sw{width:32px;height:32px;border-radius:50%;border:1.5px solid rgba(0,0,0,.06);}
+  .p-lbl{font-size:10px;color:var(--muted);letter-spacing:.2em;margin-right:4px;}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <!-- ============================== HEADER ============================== -->
+  <div class="head">
+    <div class="kicker">KIDS BRUNCH CAFE</div>
+    <div class="brand">놀담<span class="en">Noldam</span></div>
+    <div class="slogan">"아이는 놀고, 어른은 쉬고."</div>
+    <div class="subtag">근교의 감각적인 브런치 · 좋은 커피 · 안전한 놀이존</div>
+  </div>
+
+  <!-- ==================== SIGNATURE HERO — 놀이존 이용 ==================== -->
+  <div class="hero">
+
+    <!-- ★ 놀이존 일러스트 (순수 인라인 SVG · 미끄럼틀/볼풀/풍선/별·하트) -->
+    <div class="hero-art">
+      <svg viewBox="0 0 480 380" role="img" aria-label="놀이존에서 미끄럼틀을 타고 볼풀에서 노는 아이들 일러스트">
+        <defs>
+          <linearGradient id="chute" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#E9A96C"/>
+            <stop offset="1" stop-color="#E39A5C"/>
+          </linearGradient>
+          <clipPath id="tubClip">
+            <path d="M302 272 C302 300 322 324 372 324 C422 324 442 300 442 272 Z"/>
+          </clipPath>
+        </defs>
+
+        <!-- ===== SKY (투명 배경 → 애프리콧 그라데이션이 하늘이 됨) ===== -->
+        <!-- 부드러운 구름 -->
+        <g fill="#FCFAF4" opacity="0.9">
+          <circle cx="78" cy="72" r="20"/>
+          <circle cx="104" cy="63" r="25"/>
+          <circle cx="132" cy="73" r="18"/>
+          <rect x="74" y="70" width="62" height="20" rx="10"/>
+        </g>
+        <!-- 별(스파클) · 애프리콧 -->
+        <g fill="#E39A5C">
+          <path transform="translate(258,44) scale(1.05)" d="M0 -9 C1.2 -3 3 -1.2 9 0 C3 1.2 1.2 3 0 9 C-1.2 3 -3 1.2 -9 0 C-3 -1.2 -1.2 -3 0 -9 Z"/>
+          <path transform="translate(322,86) scale(0.72)" d="M0 -9 C1.2 -3 3 -1.2 9 0 C3 1.2 1.2 3 0 9 C-1.2 3 -3 1.2 -9 0 C-3 -1.2 -1.2 -3 0 -9 Z"/>
+          <path transform="translate(196,40) scale(0.6)" d="M0 -9 C1.2 -3 3 -1.2 9 0 C3 1.2 1.2 3 0 9 C-1.2 3 -3 1.2 -9 0 C-3 -1.2 -1.2 -3 0 -9 Z"/>
+        </g>
+        <!-- 하트 · 세이지 -->
+        <g>
+          <path transform="translate(150,58) scale(1.1)" d="M0 4.5 C-1.8 0.5 -7 -0.5 -7 -4 C-7 -6.6 -3.4 -7 0 -3.4 C3.4 -7 7 -6.6 7 -4 C7 -0.5 1.8 0.5 0 4.5 Z" fill="#7C8B6B"/>
+          <path transform="translate(300,120) scale(0.8)" d="M0 4.5 C-1.8 0.5 -7 -0.5 -7 -4 C-7 -6.6 -3.4 -7 0 -3.4 C3.4 -7 7 -6.6 7 -4 C7 -0.5 1.8 0.5 0 4.5 Z" fill="#CE8038"/>
+        </g>
+
+        <!-- 풍선 -->
+        <g>
+          <path d="M418 122 C414 128 422 128 418 122 Z" fill="#CE8038"/>
+          <path d="M418 120 C416 132 404 150 410 172" fill="none" stroke="#66755A" stroke-width="1.6" stroke-linecap="round"/>
+          <ellipse cx="418" cy="88" rx="27" ry="31" fill="#E39A5C"/>
+          <path d="M411 120 L425 120 L418 128 Z" fill="#CE8038"/>
+          <ellipse cx="409" cy="78" rx="7" ry="10" fill="#F3CBA2" opacity="0.85"/>
+        </g>
+
+        <!-- ===== 바닥 매트 (그라운딩) ===== -->
+        <ellipse cx="250" cy="346" rx="226" ry="34" fill="#CBD3BC"/>
+        <ellipse cx="250" cy="343" rx="200" ry="26" fill="#D7DECB"/>
+
+        <!-- ===== 미끄럼틀 (왼쪽) ===== -->
+        <!-- 사다리 -->
+        <rect x="95" y="170" width="9" height="152" rx="4.5" fill="#66755A"/>
+        <rect x="132" y="170" width="9" height="152" rx="4.5" fill="#7C8B6B"/>
+        <g fill="#7C8B6B">
+          <rect x="99" y="204" width="38" height="8" rx="4"/>
+          <rect x="99" y="242" width="38" height="8" rx="4"/>
+          <rect x="99" y="280" width="38" height="8" rx="4"/>
+        </g>
+        <!-- 상단 플랫폼 + 안전 기둥 -->
+        <rect x="88" y="150" width="66" height="20" rx="9" fill="#CE8038"/>
+        <rect x="90" y="128" width="7" height="24" rx="3.5" fill="#CE8038"/>
+        <circle cx="93.5" cy="127" r="5" fill="#E39A5C"/>
+        <!-- 미끄럼 슬로프: 몸통(그라데이션) + 표면 하이라이트 -->
+        <path d="M150 160 C200 166 238 196 248 236 C253 260 251 280 249 293"
+              fill="none" stroke="url(#chute)" stroke-width="30" stroke-linecap="round"/>
+        <path d="M150 160 C200 166 238 196 248 236 C253 260 251 280 249 293"
+              fill="none" stroke="#F3CBA2" stroke-width="10" stroke-linecap="round" opacity="0.9"/>
+        <!-- 슬로프 하단 지지대 -->
+        <path d="M246 258 L250 320" stroke="#CE8038" stroke-width="8" stroke-linecap="round"/>
+
+        <!-- 미끄럼 타는 아이 (슬로프 꼭대기에 앉아 두 팔 번쩍) -->
+        <g transform="translate(170,150)">
+          <!-- 다리: 슬로프 아래로 뻗음 -->
+          <path d="M4 12 C16 18 24 24 30 30" fill="none" stroke="#F6D8BC" stroke-width="9" stroke-linecap="round"/>
+          <path d="M8 6 C20 10 28 16 34 22" fill="none" stroke="#F6D8BC" stroke-width="9" stroke-linecap="round"/>
+          <circle cx="31" cy="31" r="5.5" fill="#CE8038"/>
+          <circle cx="35" cy="23" r="5.5" fill="#CE8038"/>
+          <!-- 뒤쪽 든 팔 -->
+          <path d="M-7 -6 C-16 -16 -20 -24 -19 -32" fill="none" stroke="#F6D8BC" stroke-width="8.5" stroke-linecap="round"/>
+          <circle cx="-19" cy="-34" r="5" fill="#F6D8BC"/>
+          <!-- 몸통(멜빵 롬퍼) -->
+          <ellipse cx="0" cy="2" rx="13.5" ry="15" fill="#7C8B6B"/>
+          <path d="M-7 -9 L-4 4 M7 -9 L4 4" stroke="#66755A" stroke-width="3" stroke-linecap="round"/>
+          <!-- 앞쪽 든 팔 -->
+          <path d="M7 -7 C16 -16 21 -24 21 -33" fill="none" stroke="#F6D8BC" stroke-width="8.5" stroke-linecap="round"/>
+          <circle cx="21" cy="-35" r="5" fill="#F6D8BC"/>
+          <!-- 머리 -->
+          <circle cx="0" cy="-20" r="15.5" fill="#F6D8BC"/>
+          <path d="M-15 -23 C-13 -37 13 -37 15 -23 C10 -31 -10 -31 -15 -23 Z" fill="#66755A"/>
+          <circle cx="-6" cy="-20" r="2.2" fill="#3D3A34"/>
+          <circle cx="6" cy="-20" r="2.2" fill="#3D3A34"/>
+          <circle cx="-10" cy="-15" r="3" fill="#E39A5C" opacity="0.45"/>
+          <circle cx="10" cy="-15" r="3" fill="#E39A5C" opacity="0.45"/>
+          <path d="M-4 -13 Q0 -9 4 -13" fill="none" stroke="#3D3A34" stroke-width="1.7" stroke-linecap="round"/>
+        </g>
+
+        <!-- ===== 볼풀 (오른쪽) ===== -->
+        <!-- 볼풀에서 노는 아이(뒤에서 빼꼼) -->
+        <g transform="translate(372,236)">
+          <path d="M-14 6 C-22 -4 -26 -10 -26 -18" fill="none" stroke="#F6D8BC" stroke-width="8.5" stroke-linecap="round"/>
+          <circle cx="-26" cy="-20" r="4.6" fill="#F6D8BC"/>
+          <path d="M14 6 C22 -4 26 -10 26 -18" fill="none" stroke="#F6D8BC" stroke-width="8.5" stroke-linecap="round"/>
+          <circle cx="26" cy="-20" r="4.6" fill="#F6D8BC"/>
+          <circle cx="0" cy="0" r="15" fill="#F6D8BC"/>
+          <path d="M-14 -3 C-12 -17 12 -17 14 -3 C9 -11 -9 -11 -14 -3 Z" fill="#CE8038"/>
+          <circle cx="-5.5" cy="0" r="2.1" fill="#3D3A34"/>
+          <circle cx="5.5" cy="0" r="2.1" fill="#3D3A34"/>
+          <circle cx="-9" cy="5" r="2.7" fill="#E39A5C" opacity="0.45"/>
+          <circle cx="9" cy="5" r="2.7" fill="#E39A5C" opacity="0.45"/>
+          <path d="M-3.5 7 Q0 10.5 3.5 7" fill="none" stroke="#3D3A34" stroke-width="1.6" stroke-linecap="round"/>
+        </g>
+
+        <!-- 통 뒤쪽 테두리 -->
+        <ellipse cx="372" cy="272" rx="71" ry="19" fill="#7C8B6B"/>
+        <ellipse cx="372" cy="270" rx="71" ry="18" fill="#8B9A79"/>
+        <!-- 공들 (통 안, 앞벽에 클립되어 담긴 느낌) -->
+        <g clip-path="url(#tubClip)">
+          <circle cx="345" cy="262" r="17" fill="#E39A5C"/>
+          <circle cx="378" cy="256" r="18" fill="#F6F1E7" stroke="#CBD3BC" stroke-width="1.4"/>
+          <circle cx="410" cy="266" r="16" fill="#A6B191"/>
+          <circle cx="360" cy="276" r="15" fill="#F0BE93"/>
+          <circle cx="396" cy="278" r="16" fill="#CE8038"/>
+          <circle cx="332" cy="280" r="13" fill="#D7DECB"/>
+        </g>
+        <!-- 테두리 위로 살짝 튀어나온 공들 -->
+        <circle cx="345" cy="260" r="16" fill="#E39A5C"/>
+        <circle cx="378" cy="253" r="17" fill="#F6F1E7" stroke="#CBD3BC" stroke-width="1.4"/>
+        <circle cx="371" cy="248" r="4" fill="#FCFAF4" opacity="0.7"/>
+        <circle cx="409" cy="264" r="15" fill="#A6B191"/>
+        <!-- 튀어오르는 공 + 점선 궤적 -->
+        <path d="M320 236 C308 218 300 214 296 216" fill="none" stroke="#E39A5C" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 6"/>
+        <circle cx="316" cy="238" r="11" fill="#E39A5C"/>
+        <circle cx="312" cy="234" r="3" fill="#F3CBA2" opacity="0.8"/>
+        <!-- 통 앞벽 -->
+        <path d="M302 272 C302 300 322 324 372 324 C422 324 442 300 442 272 C442 292 424 306 372 306 C320 306 302 292 302 272 Z" fill="#66755A"/>
+        <path d="M317 300 C333 310 355 313 372 313" fill="none" stroke="#7C8B6B" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
+
+        <!-- 작은 반짝임 -->
+        <g fill="#CE8038" opacity="0.8">
+          <circle cx="286" cy="176" r="2.4"/>
+          <circle cx="452" cy="196" r="2.4"/>
+          <circle cx="164" cy="118" r="2"/>
+        </g>
+      </svg>
+    </div>
+
+    <!-- 시그니처 카피 + 가격 -->
+    <div class="hero-body">
+      <div class="hero-badge-row">
+        <span class="hero-badge"><span class="st">★</span>SIGNATURE</span>
+        <span class="hero-en">PLAY ZONE</span>
+      </div>
+      <div class="hero-title">놀이존 이용</div>
+      <div class="hero-emph">"놀담의 진짜 시그니처. 아이는 마음껏 놀고,<br>부모는 그 모습을 보며 진짜 쉽니다."</div>
+      <div class="hero-sub">유리 파티션 안전 놀이존 — 앉은 자리에서 아이가 다 보여요.</div>
+
+      <div class="hero-prices">
+        <div class="pz">
+          <span class="pz-name">아이 1인 (기본)</span><span class="pz-desc">2시간 · 음료 또는 간식 1개 포함</span>
+          <span class="pz-dot"></span><span class="pz-price">15,000</span>
+        </div>
+        <div class="pz">
+          <span class="pz-name">24개월 미만</span><span class="pz-desc">2시간 · 간식 1개 포함</span>
+          <span class="pz-dot"></span><span class="pz-price">8,000</span>
+        </div>
+        <div class="pz">
+          <span class="pz-name">추가 시간</span><span class="pz-desc">30분당</span>
+          <span class="pz-dot"></span><span class="pz-price">3,000</span>
+        </div>
+        <div class="pz">
+          <span class="pz-name">보호자 동반</span><span class="pz-desc">음료 1잔 주문 시</span>
+          <span class="pz-dot"></span><span class="pz-price free">무료</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================== MENU GRID =========================== -->
+  <div class="menu">
+
+    <!-- ---------- LEFT COLUMN ---------- -->
+    <div class="mcol">
+
+      <!-- 01 커피 -->
+      <div class="cat">
+        <div class="cat-h"><span class="cat-no">01</span><span class="cat-ko">커피</span><span class="cat-en">COFFEE</span></div>
+        <div class="cat-rule"></div>
+        <div class="item"><div class="it-left"><div class="it-name">놀담 블렌드 아메리카노</div><div class="it-desc">시그니처 원두, 산미 낮고 균형 잡힌 기본기</div></div><div class="leader"></div><div class="it-price">4,800<span class="sub">ICE 5,300</span></div></div>
+        <div class="item"><div class="it-left"><div class="it-name">카페라떼</div><div class="it-desc">고소한 우유와 에스프레소의 정석</div></div><div class="leader"></div><div class="it-price">5,300</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">바닐라 빈 라떼</div><div class="it-desc">진짜 바닐라빈, 은은한 단맛</div></div><div class="leader"></div><div class="it-price">5,800</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">플랫화이트</div><div class="it-desc">커피 향 진하게, 부드럽게</div></div><div class="leader"></div><div class="it-price">5,500</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">콜드브루</div><div class="it-desc">12시간 저온 추출, 깔끔한 여운</div></div><div class="leader"></div><div class="it-price">5,800</div></div>
+        <div class="callout">☕ 디카페인 변경 +500원 — 임산부·수유 중인 부모를 위한 배려</div>
+      </div>
+
+      <!-- 02 논커피 -->
+      <div class="cat">
+        <div class="cat-h"><span class="cat-no">02</span><span class="cat-ko">논커피</span><span class="cat-en">NON-COFFEE</span></div>
+        <div class="cat-rule"></div>
+        <div class="item"><div class="it-left"><div class="it-name">유기농 흑임자 라떼</div><div class="it-desc">국산 흑임자, 고소하고 든든하게</div></div><div class="leader"></div><div class="it-price">6,000</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">제주 말차 라떼</div><div class="it-desc">제주산 말차, 쌉쌀하고 진하게</div></div><div class="leader"></div><div class="it-price">6,000</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">하우스 레모네이드</div><div class="it-desc">갓 짠 레몬, 상큼한 청량감</div></div><div class="leader"></div><div class="it-price">6,000</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">자몽 허니 에이드</div><div class="it-desc">자몽 과육 듬뿍, 탄산 시원하게</div></div><div class="leader"></div><div class="it-price">6,500</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">캐모마일 · 루이보스 티</div><div class="it-desc">카페인 프리, 부모도 아이도 안심</div></div><div class="leader"></div><div class="it-price">5,500</div></div>
+      </div>
+    </div>
+
+    <!-- ---------- RIGHT COLUMN ---------- -->
+    <div class="mcol">
+
+      <!-- 03 브런치 -->
+      <div class="cat">
+        <div class="cat-h"><span class="cat-no">03</span><span class="cat-ko">브런치</span><span class="cat-en">BRUNCH · 11:00–15:00</span></div>
+        <div class="cat-note">주말, 부모가 제대로 챙기는 진짜 한 끼.</div>
+        <div class="item"><div class="it-left"><div class="it-name"><span class="hot">인기</span>놀담 리코타 팬케이크</div><div class="it-desc">두툼한 3단, 홈메이드 리코타 &amp; 제철 과일</div></div><div class="leader"></div><div class="it-price">16,500</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">에그 베네딕트</div><div class="it-desc">잉글리시 머핀 · 수란 · 홀랜다이즈 소스</div></div><div class="leader"></div><div class="it-price">15,500</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">트러플 감자 &amp; 수란 플레이트</div><div class="it-desc">트러플 향 으깬 감자, 수란, 루꼴라</div></div><div class="leader"></div><div class="it-price">17,000</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">아보카도 오픈 샌드위치</div><div class="it-desc">통아보카도 · 사워도우 · 페타 치즈</div></div><div class="leader"></div><div class="it-price">14,000</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">크로크무슈 &amp; 사이드 샐러드</div><div class="it-desc">햄·치즈·베샤멜, 든든한 오픈 토스트</div></div><div class="leader"></div><div class="it-price">13,500</div></div>
+      </div>
+
+      <!-- 04 아이 메뉴 -->
+      <div class="cat">
+        <div class="cat-h"><span class="cat-no">04</span><span class="cat-ko">아이 메뉴</span><span class="cat-en">FOR KIDS</span></div>
+        <div class="cat-note">저당·저염 · 아이가 좋아하고 부모가 안심하는 구성.</div>
+        <div class="item"><div class="it-left"><div class="it-name">과일 듬뿍 미니 팬케이크</div><div class="it-desc">시럽 대신 과일의 단맛, 한입 크기</div></div><div class="leader"></div><div class="it-price">8,500</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">치즈 오믈렛 &amp; 미니 주먹밥</div><div class="it-desc">순한 간, 아이 손에 딱 맞는 사이즈</div></div><div class="leader"></div><div class="it-price">8,000</div></div>
+        <div class="item"><div class="it-left"><div class="it-name">무염 고구마 스틱 &amp; 제철 과일</div><div class="it-desc">24개월부터 안심, 간식 겸 식사</div></div><div class="leader"></div><div class="it-price">6,500</div></div>
+      </div>
+
+      <!-- 편의 안내 카드 -->
+      <div class="info">
+        <div class="info-h">놀담 편의 안내<span>AMENITIES</span></div>
+        <div class="info-grid">
+          <div class="info-i">수유실 · 기저귀 교환대 완비</div>
+          <div class="info-i">유아용 식기 · 아기 의자 무료</div>
+          <div class="info-i">전 좌석 놀이존 뷰 · 통유리 개방감</div>
+          <div class="info-i">주차 2시간 무료 · 주말 예약 권장</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================== FOOTER ============================== -->
+  <div class="foot">
+    <div class="foot-l">
+      <div class="f-slogan">"예쁜데, 안심되는 곳."</div>
+      <div class="f-icons">☕ 좋은 원두 &nbsp;·&nbsp; 🍳 제대로 된 브런치 &nbsp;·&nbsp; 🎠 안전한 놀이존</div>
+      <div class="f-note">모든 메뉴는 매장 상황에 따라 변동될 수 있습니다. · 아이 메뉴는 알레르기 성분을 미리 문의해 주세요.</div>
+    </div>
+    <div class="palette">
+      <span class="p-lbl">PALETTE</span>
+      <div class="sw" style="background:#F6F1E7"></div>
+      <div class="sw" style="background:#7C8B6B"></div>
+      <div class="sw" style="background:#E39A5C"></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

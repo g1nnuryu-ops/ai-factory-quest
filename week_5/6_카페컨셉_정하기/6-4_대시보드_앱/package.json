@@ -1,0 +1,19 @@
+{
+  "name": "noldam-cafe-dashboard",
+  "version": "1.0.0",
+  "description": "놀담(Noldam) 키즈 브런치 카페 사장님용 통합 대시보드 — email/password + JWT 인증, 카페 운영데이터(매출·메뉴·재고) DB 연동, 파주 날씨 기반 손님수 예측, 노션 할일/발주 메모, AI 오늘의 브리핑. (Express + Supabase Postgres, 단일 index.html 프론트)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.12.0"
+  }
+}

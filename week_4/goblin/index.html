@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>메모장 (Notes)</title>
+
+  <!-- CDN: Tailwind CSS / React 18 / ReactDOM 18 / Babel (브라우저에서 JSX 변환) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <!-- Babel 8은 preset-react 기본값이 automatic runtime이라 UMD 전역 React와 충돌(import 구문 삽입)합니다.
+       classic runtime이 기본인 7.x로 고정해 React.createElement 방식으로 변환되게 합니다. -->
+  <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
+
+  <style>
+    /* Tailwind 유틸리티로 표현하기 어려운 진입 애니메이션만 별도 정의합니다. */
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(8px) scale(0.98); }
+      to   { opacity: 1; transform: translateY(0)   scale(1); }
+    }
+    .card-in { animation: cardIn 0.22s ease-out both; }
+  </style>
+</head>
+<body class="bg-slate-100">
+  <div id="root"></div>
+
+  <!--
+    이번 예제(02)는 class/01 과 달리 client.js 를 분리하지 않고,
+    모든 React 코드를 아래 <script type="text/babel"> 안에 인라인으로 넣어
+    이 파일 하나만으로 완결되도록 구성했습니다.
+  -->
+  <script type="text/babel" data-presets="react">
+    // ============================================================
+    // 메모(노트) 앱 — Express + PostgreSQL(Supabase) 백엔드와 통신합니다.
+    // 데이터의 진실의 원천은 서버(DB)이며, localStorage 는 사용하지 않습니다.
+    // class/01 과 달리 client.js 로 분리하지 않고 이 파일 하나로 완결됩니다.
+    // ============================================================
+
+    const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+    // ----------------------------------------
+    // API 헬퍼: 2xx 가 아니면 서버의 한국어 메시지로 throw 합니다.
+    // ----------------------------------------
+    async function api(path, options) {
+      const res = await fetch(path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (_e) {
+        /* JSON 이 아닌 응답 */
+      }
+      if (!res.ok || !body || body.success === false) {
+        const msg = (body && body.message) || '요청을 처리하지 못했습니다.';
+        throw new Error(msg);
+      }
+      return body.data;
+    }
+
+    // ----------------------------------------
+    // 유틸: 작성 시각을 사람이 읽기 좋은 형태로
+    // 서버는 created_at(TIMESTAMPTZ 문자열) 을 주며, new Date() 로 바로 파싱됩니다.
+    // ----------------------------------------
+    function formatTime(ts) {
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return '';
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    // ========================================
+    // 🎨 디자인 시스템 컴포넌트 (재사용 UI · 비즈니스 로직 없음)
+    // ========================================
+
+    // 버튼: variant(primary/secondary/danger/ghost), size(sm/md)
+    function Button({ variant = 'primary', size = 'md', className = '', children, ...props }) {
+      const base =
+        'inline-flex items-center justify-center font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed';
+      const variants = {
+        primary: 'bg-indigo-600 text-white hover:bg-indigo-700 focus:ring-indigo-400',
+        secondary: 'bg-slate-200 text-slate-700 hover:bg-slate-300 focus:ring-slate-400',
+        danger: 'bg-transparent text-slate-400 hover:text-red-500 hover:bg-red-50 focus:ring-red-300',
+        ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 focus:ring-slate-300',
+      };
+      const sizes = {
+        sm: 'text-sm px-3 py-1.5',
+        md: 'text-sm px-4 py-2.5',
+      };
+      return (
+        <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...props}>
+          {children}
+        </button>
+      );
+    }
+
+    // 단일 행 입력 (제어 컴포넌트). 검색창/제목 입력에 사용
+    const Input = React.forwardRef(function Input({ className = '', ...props }, ref) {
+      return (
+        <input
+          ref={ref}
+          className={`w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 ${className}`}
+          {...props}
+        />
+      );
+    });
+
+    // 여러 줄 입력 (본문 작성용)
+    function Textarea({ className = '', ...props }) {
+      return (
+        <textarea
+          className={`w-full resize-y rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 ${className}`}
+          {...props}
+        />
+      );
+    }
+
+    // 카드: 그림자 + 둥근 모서리 래퍼
+    function Card({ className = '', children }) {
+      return (
+        <div className={`rounded-2xl bg-white shadow-xl shadow-slate-200/60 ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 메모 작성 폼
+    // ========================================
+    function NoteForm({ onAdd }) {
+      const [title, setTitle] = useState('');
+      const [body, setBody] = useState('');
+      const [saving, setSaving] = useState(false);
+      const [formError, setFormError] = useState('');
+      const titleRef = useRef(null);
+
+      // 제목 또는 본문 중 하나라도 입력되어 있으면 추가 가능
+      const canSubmit = (title.trim() !== '' || body.trim() !== '') && !saving;
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!canSubmit) return;
+        setFormError('');
+        setSaving(true);
+        try {
+          await onAdd(title.trim(), body.trim());
+          // 성공 시에만 입력 초기화 후 제목에 포커스 (연속 작성 편의)
+          setTitle('');
+          setBody('');
+          titleRef.current && titleRef.current.focus();
+        } catch (err) {
+          // 저장 실패 시 입력값은 유지하고 폼 안에 안내합니다.
+          setFormError(err.message || '메모를 추가하지 못했습니다.');
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      return (
+        <Card className="p-5 sm:p-6">
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <Input
+              ref={titleRef}
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="제목"
+              aria-label="메모 제목"
+              maxLength={100}
+            />
+            <Textarea
+              rows={4}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="내용을 입력하세요"
+              aria-label="메모 내용"
+              maxLength={2000}
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                제목 또는 내용을 입력하면 추가할 수 있어요.
+              </span>
+              <Button type="submit" disabled={!canSubmit} className="flex-shrink-0">
+                {saving ? '저장 중...' : '추가'}
+              </Button>
+            </div>
+            {/* 저장 실패 시 폼 안내 (입력값은 유지) */}
+            {formError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                {formError}
+              </div>
+            )}
+          </form>
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🧩 개별 메모 카드 (보기 모드 ↔ 편집 모드 전환)
+    // ========================================
+    function NoteCard({ note, onUpdate, onDelete }) {
+      const [editing, setEditing] = useState(false);
+      const [editTitle, setEditTitle] = useState(note.title);
+      const [editBody, setEditBody] = useState(note.body);
+      const [saving, setSaving] = useState(false);
+      const [editError, setEditError] = useState('');
+      const editTitleRef = useRef(null);
+
+      // 편집 시작: 항상 현재 메모 값으로 입력을 초기화합니다.
+      const startEdit = () => {
+        setEditTitle(note.title);
+        setEditBody(note.body);
+        setEditError('');
+        setEditing(true);
+      };
+
+      const cancelEdit = () => {
+        setEditing(false);
+        setEditError('');
+      };
+
+      // 편집 모드로 들어가면 제목 입력에 포커스를 둡니다.
+      useEffect(() => {
+        if (editing) editTitleRef.current && editTitleRef.current.focus();
+      }, [editing]);
+
+      // 제목 또는 내용 중 하나라도 남아 있어야 저장 가능 (생성 규칙과 동일)
+      const canSave = (editTitle.trim() !== '' || editBody.trim() !== '') && !saving;
+
+      const handleSave = async () => {
+        if (!canSave) return;
+        setSaving(true);
+        setEditError('');
+        try {
+          await onUpdate(note.id, editTitle.trim(), editBody.trim());
+          setEditing(false); // 성공 시에만 보기 모드로 복귀
+        } catch (err) {
+          // 실패하면 편집 상태를 유지하고 카드 안에 안내합니다.
+          setEditError(err.message || '메모를 수정하지 못했습니다.');
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      // ----- 편집 모드 -----
+      if (editing) {
+        return (
+          <li className="flex h-full flex-col rounded-2xl border border-indigo-200 bg-white p-4 shadow-sm ring-2 ring-indigo-100">
+            <div className="space-y-2">
+              <Input
+                ref={editTitleRef}
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                placeholder="제목"
+                aria-label="메모 제목 수정"
+                maxLength={100}
+                className="px-3 py-2 text-sm"
+              />
+              <Textarea
+                rows={4}
+                value={editBody}
+                onChange={(e) => setEditBody(e.target.value)}
+                placeholder="내용을 입력하세요"
+                aria-label="메모 내용 수정"
+                maxLength={2000}
+                className="px-3 py-2 text-sm"
+              />
+              {editError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+                  {editError}
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="ghost" size="sm" onClick={cancelEdit} disabled={saving}>
+                  취소
+                </Button>
+                <Button variant="primary" size="sm" onClick={handleSave} disabled={!canSave}>
+                  {saving ? '저장 중...' : '저장'}
+                </Button>
+              </div>
+            </div>
+          </li>
+        );
+      }
+
+      // ----- 보기 모드 -----
+      return (
+        <li className="card-in flex h-full flex-col rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+          {/* 상단: 제목 + 수정/삭제 버튼 */}
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="min-w-0 flex-1 break-words text-base font-semibold text-slate-800">
+              {note.title || <span className="text-slate-400">(제목 없음)</span>}
+            </h3>
+            <div className="-mr-1 -mt-1 flex flex-shrink-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={startEdit}
+                aria-label="이 메모 수정"
+                className="px-2 py-1"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.379-8.379-2.828-2.828z" />
+                </svg>
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => onDelete(note.id)}
+                aria-label="이 메모 삭제"
+                className="px-2 py-1"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fillRule="evenodd"
+                    d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </Button>
+            </div>
+          </div>
+
+          {/* 본문 미리보기: 길어도 카드가 무너지지 않도록 줄 수 제한 */}
+          {note.body && (
+            <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-600 line-clamp-4">
+              {note.body}
+            </p>
+          )}
+
+          {/* 하단: 작성 시각 (카드 높이를 맞추기 위해 mt-auto 로 바닥에 고정) */}
+          {/* 서버는 snake_case 인 created_at 으로 시각을 내려줍니다. */}
+          <p className="mt-auto pt-3 text-xs text-slate-400">
+            {formatTime(note.created_at)}
+          </p>
+        </li>
+      );
+    }
+
+    // ========================================
+    // 🧩 빈 상태 안내
+    // ========================================
+    function EmptyState({ title, desc }) {
+      return (
+        <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white/60 px-4 py-16 text-center">
+          <svg className="mb-3 h-12 w-12 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <p className="font-medium text-slate-500">{title}</p>
+          <p className="mt-1 text-sm text-slate-400">{desc}</p>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 메인 페이지 (메모 앱의 상태와 로직을 담당)
+    // ========================================
+    function NotesApp() {
+      const [notes, setNotes] = useState([]);
+      const [query, setQuery] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+
+      // 최초 로드: 서버에서 메모 목록을 가져옵니다.
+      useEffect(() => {
+        let active = true;
+        (async () => {
+          try {
+            const rows = await api('/api/notes');
+            if (active) setNotes(rows);
+          } catch (e) {
+            if (active) setError(e.message);
+          } finally {
+            if (active) setLoading(false);
+          }
+        })();
+        return () => { active = false; };
+      }, []);
+
+      // 메모 추가: 서버에 저장 후, 반환된 행을 목록 맨 앞에 끼워 넣습니다.
+      const addNote = useCallback(async (title, body) => {
+        setError('');
+        const created = await api('/api/notes', {
+          method: 'POST',
+          body: JSON.stringify({ title, body }),
+        });
+        setNotes((prev) => [created, ...prev]);
+      }, []);
+
+      // 메모 수정: 서버에 PATCH 후 반환된 행으로 해당 메모만 교체합니다.
+      // (실패 시 throw 되어 카드 안에서 에러를 표시하므로 여기서 잡지 않습니다.)
+      const updateNote = useCallback(async (id, title, body) => {
+        setError('');
+        const updated = await api(`/api/notes/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ title, body }),
+        });
+        setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)));
+      }, []);
+
+      // 메모 삭제: 낙관적으로 제거하고, 실패 시 원래 목록으로 롤백합니다.
+      const deleteNote = useCallback(async (id) => {
+        setError('');
+        const snapshot = notes;
+        setNotes((prev) => prev.filter((n) => n.id !== id));
+        try {
+          await api(`/api/notes/${id}`, { method: 'DELETE' });
+        } catch (e) {
+          setError(e.message);
+          setNotes(snapshot); // 롤백
+        }
+      }, [notes]);
+
+      // 검색어로 제목/본문 실시간 필터링 (대소문자 구분 없이)
+      const visibleNotes = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        if (!q) return notes;
+        return notes.filter(
+          (n) =>
+            n.title.toLowerCase().includes(q) ||
+            n.body.toLowerCase().includes(q)
+        );
+      }, [notes, query]);
+
+      const hasNotes = notes.length > 0;
+      const hasResults = visibleNotes.length > 0;
+
+      return (
+        <div className="min-h-screen bg-gradient-to-b from-slate-100 to-slate-200 px-4 py-10 sm:py-16">
+          <div className="mx-auto w-full max-w-3xl">
+            {/* 헤더 */}
+            <header className="mb-6 text-center">
+              <h1 className="text-3xl font-bold tracking-tight text-slate-800">메모장</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                저장된 메모{' '}
+                <span className="font-semibold text-indigo-600">{notes.length}</span>개
+              </p>
+            </header>
+
+            {/* 작성 폼 */}
+            <NoteForm onAdd={addNote} />
+
+            {/* 에러 배너 (목록 로드 / 삭제 실패 시) */}
+            {error && (
+              <div className="mt-6 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                {error}
+              </div>
+            )}
+
+            {/* 검색창 (로딩이 끝나고 메모가 있을 때만 노출) */}
+            {!loading && hasNotes && (
+              <div className="relative mt-6">
+                <svg
+                  className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="제목 또는 내용으로 검색"
+                  aria-label="메모 검색"
+                  className="pl-10"
+                />
+              </div>
+            )}
+
+            {/* 목록 / 로딩 / 빈 상태 */}
+            <div className="mt-6">
+              {loading ? (
+                // 서버에서 목록을 불러오는 중
+                <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white/60 px-4 py-16 text-center">
+                  <svg className="mb-3 h-8 w-8 animate-spin text-indigo-400" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  <p className="text-sm text-slate-400">불러오는 중...</p>
+                </div>
+              ) : hasResults ? (
+                // 데스크탑에서는 그리드, 모바일에서는 1열
+                <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {visibleNotes.map((note) => (
+                    <NoteCard key={note.id} note={note} onUpdate={updateNote} onDelete={deleteNote} />
+                  ))}
+                </ul>
+              ) : hasNotes ? (
+                // 메모는 있지만 검색 결과가 없을 때
+                <EmptyState
+                  title="검색 결과가 없어요"
+                  desc={`'${query.trim()}' 와(과) 일치하는 메모를 찾지 못했어요.`}
+                />
+              ) : (
+                // 메모가 하나도 없을 때
+                <EmptyState
+                  title="아직 메모가 없어요"
+                  desc="위 입력창에 첫 번째 메모를 작성해 보세요."
+                />
+              )}
+            </div>
+
+            <p className="mt-8 text-center text-xs text-slate-400">
+              메모는 데이터베이스에 저장되어 어디서 접속해도 유지됩니다.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App 컴포넌트 (루트)
+    // ========================================
+    function App() {
+      return <NotesApp />;
+    }
+
+    // ========================================
+    // 렌더링
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

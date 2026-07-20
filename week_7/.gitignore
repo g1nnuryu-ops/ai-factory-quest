@@ -1,0 +1,7 @@
+# quest/ 는 공개 저장소로 동기화된다. 비밀키가 절대 커밋되지 않도록 week_7 하위 전체에서 .env 차단.
+.env
+.env.*
+!.env.example
+
+node_modules/
+.vercel

@@ -1,0 +1,10 @@
+node_modules
+.env
+.env.*
+
+# 문서·스크린샷·시연영상은 런타임에 필요 없다(번들만 커진다)
+*.png
+*.jpg
+*.mp4
+SPEC.md
+README.md

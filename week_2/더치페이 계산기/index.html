@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>더치페이 계산기</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    /* Tailwind으로 표현하기 어려운 커스텀 애니메이션/스크롤바만 정의 */
+    body { background-color: #b2c7d9; } /* 카카오톡 채팅방 배경색 */
+    @keyframes pop-in {
+      0% { opacity: 0; transform: translateY(8px) scale(0.98); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .animate-pop-in { animation: pop-in 0.18s ease-out; }
+    /* 스크롤바 슬림하게 */
+    .scroll-slim::-webkit-scrollbar { width: 6px; }
+    .scroll-slim::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 999px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks 구조 분해
+    // ========================================
+    const { useState, useMemo, useRef } = React;
+
+    // ========================================
+    // 유틸 함수
+    // ========================================
+    // 숫자를 한국 원화 형식으로 포맷 (예: 12000 -> "12,000")
+    const formatWon = (n) => {
+      const num = Math.round(Number(n) || 0);
+      return num.toLocaleString('ko-KR');
+    };
+
+    // 고유 id 생성용 카운터
+    let _uid = 0;
+    const uid = () => (++_uid).toString();
+
+    // 카카오톡 프로필 느낌의 파스텔 색상 팔레트 (참가자 아바타 색상)
+    const AVATAR_COLORS = [
+      '#FFB6B9', '#FAD390', '#A8E6CF', '#A0C4FF',
+      '#BDB2FF', '#FFC6FF', '#FFD6A5', '#9BF6FF',
+    ];
+
+    // ========================================
+    // 🎨 디자인 시스템 컴포넌트 (프레젠테이션 전용)
+    // ========================================
+
+    // 카카오 옐로우 기반 버튼
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, children, className = '', type = 'button' }) {
+      const base = 'inline-flex items-center justify-center font-bold rounded-xl transition-all active:scale-95 focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed';
+      const sizes = {
+        sm: 'px-3 py-1.5 text-sm',
+        md: 'px-4 py-2.5 text-sm',
+        lg: 'px-5 py-3.5 text-base w-full',
+      };
+      const variants = {
+        primary: 'bg-[#FEE500] text-[#3C1E1E] shadow-sm hover:brightness-95',
+        secondary: 'bg-white text-gray-700 border border-gray-200 shadow-sm hover:bg-gray-50',
+        danger: 'bg-red-50 text-red-500 hover:bg-red-100',
+        ghost: 'bg-transparent text-gray-500 hover:bg-black/5',
+      };
+      return (
+        <button
+          type={type}
+          disabled={disabled}
+          onClick={onClick}
+          className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    // 라벨 + 인풋 묶음 (controlled)
+    function Input({ label, type = 'text', value, onChange, placeholder, error, className = '', inputMode, onKeyDown }) {
+      return (
+        <label className={`block ${className}`}>
+          {label && <span className="block text-xs font-semibold text-gray-500 mb-1">{label}</span>}
+          <input
+            type={type}
+            inputMode={inputMode}
+            value={value}
+            onChange={onChange}
+            onKeyDown={onKeyDown}
+            placeholder={placeholder}
+            className={`w-full px-3 py-2.5 rounded-xl border bg-white text-sm text-gray-800 placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-[#FEE500] ${error ? 'border-red-300' : 'border-gray-200'}`}
+          />
+          {error && <span className="block text-xs text-red-400 mt-1">{error}</span>}
+        </label>
+      );
+    }
+
+    // 카카오톡 말풍선 스타일 카드 (왼쪽 꼬리 포함)
+    function BubbleCard({ children, color = '#ffffff', className = '' }) {
+      return (
+        <div
+          className={`relative rounded-2xl rounded-tl-md shadow-sm animate-pop-in ${className}`}
+          style={{ backgroundColor: color }}
+        >
+          {children}
+        </div>
+      );
+    }
+
+    // 색상 원형 아바타
+    function Avatar({ name, color }) {
+      const initial = name ? name.trim().charAt(0).toUpperCase() : '?';
+      return (
+        <div
+          className="flex-shrink-0 w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-[#3C1E1E] text-base shadow-inner"
+          style={{ backgroundColor: color }}
+        >
+          {initial}
+        </div>
+      );
+    }
+
+    // 배지 (금액 강조 등)
+    function Badge({ children, className = '' }) {
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    // ========================================
+    // 🧩 메뉴 입력 행 컴포넌트
+    // 한 참가자의 메뉴 하나(이름 + 가격)를 추가하는 작은 폼
+    // ========================================
+    function MenuAdder({ onAdd }) {
+      const [menuName, setMenuName] = useState('');
+      const [menuPrice, setMenuPrice] = useState('');
+      const [error, setError] = useState('');
+
+      const handleAdd = () => {
+        // 조건 분기: 입력 유효성 검사
+        const priceNum = Number(menuPrice);
+        if (menuName.trim() === '') {
+          setError('메뉴 이름을 입력하세요');
+          return;
+        }
+        if (menuPrice === '' || isNaN(priceNum) || priceNum <= 0) {
+          setError('가격을 올바르게 입력하세요');
+          return;
+        }
+        onAdd({ id: uid(), name: menuName.trim(), price: priceNum });
+        setMenuName('');
+        setMenuPrice('');
+        setError('');
+      };
+
+      const handleKey = (e) => {
+        if (e.key === 'Enter') handleAdd();
+      };
+
+      return (
+        <div className="mt-2">
+          <div className="flex gap-2">
+            <input
+              value={menuName}
+              onChange={(e) => setMenuName(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="메뉴 이름"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-[#FEE500]"
+            />
+            <input
+              value={menuPrice}
+              onChange={(e) => setMenuPrice(e.target.value.replace(/[^0-9]/g, ''))}
+              onKeyDown={handleKey}
+              inputMode="numeric"
+              placeholder="가격"
+              className="w-24 px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-sm text-right focus:outline-none focus:ring-2 focus:ring-[#FEE500]"
+            />
+            <Button size="sm" onClick={handleAdd} className="px-3">＋</Button>
+          </div>
+          {error && <p className="text-xs text-red-400 mt-1 ml-1">{error}</p>}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 참가자 카드 컴포넌트
+    // 참가자 1명: 아바타 + 이름 + 메뉴 목록 + 메뉴 추가 + 소계
+    // ========================================
+    function ParticipantCard({ person, color, onAddMenu, onRemoveMenu, onRemovePerson }) {
+      // 반복문(reduce)으로 이 참가자의 메뉴 합계 계산
+      const subtotal = person.menus.reduce((sum, m) => sum + m.price, 0);
+
+      return (
+        <div className="flex gap-2 items-start">
+          <Avatar name={person.name} color={color} />
+          <BubbleCard className="flex-1 min-w-0 p-3">
+            {/* 이름 행 */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold text-gray-800 truncate">{person.name}</span>
+              <button
+                onClick={onRemovePerson}
+                className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0"
+                aria-label="참가자 삭제"
+              >
+                ✕ 나가기
+              </button>
+            </div>
+
+            {/* 개인 메뉴 목록 (반복문 map으로 렌더링) */}
+            {person.menus.length === 0 ? (
+              <p className="text-xs text-gray-300 mt-2">혼자 먹은 메뉴가 없어요 (공유 메뉴는 아래에서)</p>
+            ) : (
+              <ul className="mt-2 space-y-1">
+                {person.menus.map((menu) => (
+                  <li
+                    key={menu.id}
+                    className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-2.5 py-1.5"
+                  >
+                    <span className="text-gray-700 truncate mr-2">{menu.name}</span>
+                    <span className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-gray-600 font-medium">{formatWon(menu.price)}원</span>
+                      <button
+                        onClick={() => onRemoveMenu(menu.id)}
+                        className="text-gray-300 hover:text-red-400"
+                        aria-label="메뉴 삭제"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* 메뉴 추가 폼 */}
+            <MenuAdder onAdd={onAddMenu} />
+
+            {/* 소계 */}
+            <div className="flex justify-end mt-2 pt-2 border-t border-dashed border-gray-100">
+              <span className="text-xs text-gray-400 mr-2 self-center">개인 메뉴</span>
+              <Badge className="bg-[#FEE500]/40 text-[#3C1E1E]">{formatWon(subtotal)}원</Badge>
+            </div>
+          </BubbleCard>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 할인 입력 영역
+    // 정액(원) / 정률(%) 분기 처리
+    // ========================================
+    function DiscountSection({ discountType, setDiscountType, discountValue, setDiscountValue }) {
+      return (
+        <div className="bg-white rounded-2xl p-3 shadow-sm">
+          <p className="font-bold text-gray-800 text-sm mb-2">💸 할인 적용</p>
+          {/* 할인 종류 선택 탭 */}
+          <div className="flex gap-2 mb-2">
+            <button
+              onClick={() => setDiscountType('amount')}
+              className={`flex-1 py-2 rounded-xl text-sm font-bold transition ${
+                discountType === 'amount'
+                  ? 'bg-[#FEE500] text-[#3C1E1E]'
+                  : 'bg-gray-100 text-gray-400'
+              }`}
+            >
+              정액 할인 (원)
+            </button>
+            <button
+              onClick={() => setDiscountType('percent')}
+              className={`flex-1 py-2 rounded-xl text-sm font-bold transition ${
+                discountType === 'percent'
+                  ? 'bg-[#FEE500] text-[#3C1E1E]'
+                  : 'bg-gray-100 text-gray-400'
+              }`}
+            >
+              정률 할인 (%)
+            </button>
+          </div>
+          <div className="relative">
+            <input
+              value={discountValue}
+              onChange={(e) => setDiscountValue(e.target.value.replace(/[^0-9.]/g, ''))}
+              inputMode="numeric"
+              placeholder={discountType === 'amount' ? '할인 금액 (예: 5000)' : '할인율 (예: 10)'}
+              className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-[#FEE500]"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-bold">
+              {discountType === 'amount' ? '원' : '%'}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 공유 메뉴 영역
+    // 여러 명이 함께 먹은 메뉴: 가격을 선택한 인원수로 N분의 1
+    // ========================================
+    function SharedMenuSection({ participants, sharedMenus, onAdd, onRemove }) {
+      const [name, setName] = useState('');
+      const [price, setPrice] = useState('');
+      const [selected, setSelected] = useState([]); // 함께 먹은 참가자 id 배열
+      const [error, setError] = useState('');
+
+      // 참가자 선택 토글 (조건 분기: 이미 있으면 빼고, 없으면 추가)
+      const toggle = (id) => {
+        setSelected((prev) =>
+          prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
+      };
+
+      const handleAdd = () => {
+        const priceNum = Number(price);
+        // 조건 분기: 입력 유효성 검사
+        if (name.trim() === '') { setError('메뉴 이름을 입력하세요'); return; }
+        if (price === '' || isNaN(priceNum) || priceNum <= 0) { setError('가격을 올바르게 입력하세요'); return; }
+        if (selected.length === 0) { setError('함께 먹은 사람을 선택하세요'); return; }
+        onAdd({ id: uid(), name: name.trim(), price: priceNum, sharedBy: selected });
+        setName(''); setPrice(''); setSelected([]); setError('');
+      };
+
+      return (
+        <div className="bg-white rounded-2xl p-3 shadow-sm">
+          <p className="font-bold text-gray-800 text-sm mb-1">🍻 함께 먹은 메뉴 (N분의 1)</p>
+          <p className="text-[11px] text-gray-400 mb-2">메뉴 가격을 선택한 사람들끼리 똑같이 나눠 부담해요</p>
+
+          {/* 등록된 공유 메뉴 목록 (반복문 map) */}
+          {sharedMenus.length > 0 && (
+            <ul className="space-y-1.5 mb-2">
+              {sharedMenus.map((sm) => {
+                // 함께 먹은 사람 이름들 (현재 참가자 기준으로 필터)
+                const members = sm.sharedBy
+                  .map((id) => participants.find((p) => p.id === id))
+                  .filter(Boolean);
+                const perPerson = members.length > 0 ? sm.price / members.length : 0;
+                return (
+                  <li key={sm.id} className="bg-gray-50 rounded-xl px-3 py-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-700 font-medium truncate mr-2">{sm.name}</span>
+                      <span className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-gray-600 font-semibold">{formatWon(sm.price)}원</span>
+                        <button
+                          onClick={() => onRemove(sm.id)}
+                          className="text-gray-300 hover:text-red-400"
+                          aria-label="공유 메뉴 삭제"
+                        >✕</button>
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {members.map((m) => m.name).join(', ')} · 1인 {formatWon(perPerson)}원
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {/* 공유 메뉴 추가 폼 */}
+          <div className="flex gap-2">
+            <input
+              value={name}
+              onChange={(e) => { setName(e.target.value); setError(''); }}
+              placeholder="메뉴 이름 (예: 치킨)"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-[#FEE500]"
+            />
+            <input
+              value={price}
+              onChange={(e) => { setPrice(e.target.value.replace(/[^0-9]/g, '')); setError(''); }}
+              inputMode="numeric"
+              placeholder="가격"
+              className="w-24 px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-sm text-right focus:outline-none focus:ring-2 focus:ring-[#FEE500]"
+            />
+          </div>
+
+          {/* 함께 먹은 사람 선택 칩 (반복문 map) */}
+          {participants.length === 0 ? (
+            <p className="text-[11px] text-gray-300 mt-2">참가자를 먼저 추가하세요</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {participants.map((p) => {
+                const on = selected.includes(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => toggle(p.id)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-bold transition ${
+                      on ? 'bg-[#FEE500] text-[#3C1E1E]' : 'bg-gray-100 text-gray-400'
+                    }`}
+                  >
+                    {on ? '✓ ' : ''}{p.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <Button size="sm" onClick={handleAdd} className="w-full mt-2">＋ 공유 메뉴 추가</Button>
+          {error && <p className="text-xs text-red-400 mt-1 ml-1">{error}</p>}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 결과(정산) 영역
+    // 각 참가자 최종 부담액을 말풍선으로 보여줌
+    // ========================================
+    function ResultSection({ results, totalBefore, totalDiscount, totalAfter }) {
+      return (
+        <div className="bg-[#FEE500] rounded-2xl p-4 shadow-md">
+          <p className="font-extrabold text-[#3C1E1E] text-base mb-3 flex items-center gap-1">
+            🧮 최종 정산 결과
+          </p>
+
+          {/* 전체 요약 */}
+          <div className="bg-white/70 rounded-xl p-3 mb-3 text-sm space-y-1">
+            <div className="flex justify-between text-gray-600">
+              <span>총 주문 금액</span>
+              <span className="font-bold">{formatWon(totalBefore)}원</span>
+            </div>
+            <div className="flex justify-between text-red-500">
+              <span>총 할인 금액</span>
+              <span className="font-bold">- {formatWon(totalDiscount)}원</span>
+            </div>
+            <div className="flex justify-between text-[#3C1E1E] pt-1 border-t border-dashed border-gray-300 mt-1">
+              <span className="font-bold">실제 결제 금액</span>
+              <span className="font-extrabold">{formatWon(totalAfter)}원</span>
+            </div>
+          </div>
+
+          {/* 1인별 결과 (반복문 map) */}
+          <div className="space-y-2">
+            {results.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between bg-white rounded-xl px-3 py-2.5 shadow-sm"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Avatar name={r.name} color={r.color} />
+                  <div className="min-w-0">
+                    <p className="font-bold text-gray-800 truncate">{r.name}</p>
+                    <p className="text-xs text-gray-400">
+                      먹은 금액 {formatWon(r.subtotal)}원
+                      {r.shared > 0 && (
+                        <span className="text-gray-400"> (개인 {formatWon(r.personal)} + 공유 {formatWon(r.shared)})</span>
+                      )}
+                      {r.discountShare > 0 && (
+                        <span className="text-red-400"> · 할인 -{formatWon(r.discountShare)}원</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0 ml-2">
+                  <p className="text-lg font-extrabold text-[#3C1E1E]">{formatWon(r.finalPay)}원</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App 컴포넌트 (상태 + 비즈니스 로직)
+    // ========================================
+    function App() {
+      // 참가자 배열 상태. 각 참가자는 { id, name, menus: [] }
+      const [participants, setParticipants] = useState([
+        { id: uid(), name: '나', menus: [] },
+      ]);
+      // 새 참가자 이름 입력
+      const [newName, setNewName] = useState('');
+      const [nameError, setNameError] = useState('');
+      // 공유 메뉴 배열. 각 항목 { id, name, price, sharedBy: [participantId, ...] }
+      const [sharedMenus, setSharedMenus] = useState([]);
+      // 할인 상태: 종류('amount'|'percent') + 값(문자열)
+      const [discountType, setDiscountType] = useState('amount');
+      const [discountValue, setDiscountValue] = useState('');
+
+      const listRef = useRef(null);
+
+      // 참가자에게 색상 매핑 (인덱스 기반)
+      const colorOf = (idx) => AVATAR_COLORS[idx % AVATAR_COLORS.length];
+
+      // --- 참가자 추가 ---
+      const addParticipant = () => {
+        // 조건 분기: 빈 이름 방지
+        if (newName.trim() === '') {
+          setNameError('이름을 입력하세요');
+          return;
+        }
+        setParticipants((prev) => [...prev, { id: uid(), name: newName.trim(), menus: [] }]);
+        setNewName('');
+        setNameError('');
+      };
+
+      // --- 참가자 삭제 ---
+      const removeParticipant = (personId) => {
+        setParticipants((prev) => prev.filter((p) => p.id !== personId));
+        // 공유 메뉴에서도 빠진 사람 제거. 남은 사람이 없는 공유 메뉴는 삭제
+        setSharedMenus((prev) =>
+          prev
+            .map((sm) => ({ ...sm, sharedBy: sm.sharedBy.filter((id) => id !== personId) }))
+            .filter((sm) => sm.sharedBy.length > 0)
+        );
+      };
+
+      // --- 공유 메뉴 추가/삭제 ---
+      const addSharedMenu = (menu) => {
+        setSharedMenus((prev) => [...prev, menu]);
+      };
+      const removeSharedMenu = (menuId) => {
+        setSharedMenus((prev) => prev.filter((sm) => sm.id !== menuId));
+      };
+
+      // --- 메뉴 추가 ---
+      const addMenu = (personId, menu) => {
+        setParticipants((prev) =>
+          prev.map((p) =>
+            p.id === personId ? { ...p, menus: [...p.menus, menu] } : p
+          )
+        );
+      };
+
+      // --- 메뉴 삭제 ---
+      const removeMenu = (personId, menuId) => {
+        setParticipants((prev) =>
+          prev.map((p) =>
+            p.id === personId
+              ? { ...p, menus: p.menus.filter((m) => m.id !== menuId) }
+              : p
+          )
+        );
+      };
+
+      // ========================================
+      // 정산 계산 (useMemo로 메모이즈)
+      // 1) 각자 먹은 메뉴 합계
+      // 2) 전체 합계
+      // 3) 할인 금액 산정 (정액/정률 분기)
+      // 4) 할인을 각자 비율대로 분배 -> 최종 부담액
+      // ========================================
+      const calc = useMemo(() => {
+        // 1) 각 참가자 소계 = 개인 메뉴 + 공유 메뉴 부담분
+        const personalSubtotals = participants.map((p) =>
+          p.menus.reduce((sum, m) => sum + m.price, 0)
+        );
+        // 공유 메뉴 부담분: 함께 먹은 사람 수로 N분의 1 (반복문 forEach)
+        const sharedSubtotals = participants.map((p) => {
+          let s = 0;
+          sharedMenus.forEach((sm) => {
+            if (sm.sharedBy.length > 0 && sm.sharedBy.includes(p.id)) {
+              s += sm.price / sm.sharedBy.length;
+            }
+          });
+          return s;
+        });
+        const subtotals = participants.map((_, i) => personalSubtotals[i] + sharedSubtotals[i]);
+        // 2) 전체 합계
+        const totalBefore = subtotals.reduce((sum, v) => sum + v, 0);
+
+        // 3) 할인 금액 계산 (조건 분기)
+        let totalDiscount = 0;
+        const dv = Number(discountValue) || 0;
+        if (totalBefore > 0 && dv > 0) {
+          if (discountType === 'amount') {
+            // 정액 할인: 전체 금액을 넘지 않도록 제한
+            totalDiscount = Math.min(dv, totalBefore);
+          } else {
+            // 정률 할인: 0~100% 범위로 제한
+            const rate = Math.min(dv, 100) / 100;
+            totalDiscount = totalBefore * rate;
+          }
+        }
+
+        const totalAfter = totalBefore - totalDiscount;
+
+        // 4) 할인을 비율대로 분배해 최종 부담액 계산
+        const results = participants.map((p, idx) => {
+          const subtotal = subtotals[idx];
+          // 비율: 내 소계 / 전체. 전체가 0이면 분배 없음
+          const ratio = totalBefore > 0 ? subtotal / totalBefore : 0;
+          const discountShare = Math.round(totalDiscount * ratio);
+          const finalPay = Math.max(0, Math.round(subtotal - discountShare));
+          return {
+            id: p.id,
+            name: p.name,
+            color: colorOf(idx),
+            subtotal: Math.round(subtotal),
+            personal: Math.round(personalSubtotals[idx]),
+            shared: Math.round(sharedSubtotals[idx]),
+            discountShare,
+            finalPay,
+          };
+        });
+
+        return {
+          subtotals,
+          totalBefore,
+          totalDiscount: Math.round(totalDiscount),
+          totalAfter: Math.round(totalAfter),
+          results,
+        };
+      }, [participants, sharedMenus, discountType, discountValue]);
+
+      const hasAnyMenu = calc.totalBefore > 0;
+
+      return (
+        <div className="min-h-screen flex justify-center">
+          <div className="w-full max-w-md flex flex-col bg-[#b2c7d9] min-h-screen">
+
+            {/* 상단 헤더 (카카오톡 채팅방 상단바 느낌) */}
+            <header className="sticky top-0 z-10 bg-[#FEE500] px-4 py-3 flex items-center gap-2 shadow-sm">
+              <span className="text-xl">🧮</span>
+              <div className="leading-tight">
+                <h1 className="font-extrabold text-[#3C1E1E] text-lg">더치페이 계산기</h1>
+                <p className="text-[11px] text-[#3C1E1E]/60">먹은 만큼 공평하게 나눠 내요</p>
+              </div>
+              <span className="ml-auto text-xs font-bold text-[#3C1E1E]/70 bg-white/50 px-2 py-1 rounded-lg">
+                {participants.length}명
+              </span>
+            </header>
+
+            {/* 본문 (채팅 영역) */}
+            <main ref={listRef} className="flex-1 overflow-y-auto scroll-slim px-3 py-4 space-y-3">
+
+              {/* 안내 말풍선 */}
+              <div className="flex justify-center">
+                <div className="bg-black/10 text-[#3C1E1E]/70 text-[11px] px-3 py-1 rounded-full">
+                  참가자를 추가하고 각자 먹은 메뉴를 입력하세요
+                </div>
+              </div>
+
+              {/* 참가자 목록 (반복문 map) */}
+              {participants.length === 0 ? (
+                <div className="text-center text-[#3C1E1E]/50 text-sm py-10">
+                  참가자가 없어요. 아래에서 추가해 주세요 👇
+                </div>
+              ) : (
+                participants.map((p) => (
+                  <ParticipantCard
+                    key={p.id}
+                    person={p}
+                    color={colorOf(participants.indexOf(p))}
+                    onAddMenu={(menu) => addMenu(p.id, menu)}
+                    onRemoveMenu={(menuId) => removeMenu(p.id, menuId)}
+                    onRemovePerson={() => removeParticipant(p.id)}
+                  />
+                ))
+              )}
+
+              {/* 공유 메뉴 영역 */}
+              <SharedMenuSection
+                participants={participants}
+                sharedMenus={sharedMenus}
+                onAdd={addSharedMenu}
+                onRemove={removeSharedMenu}
+              />
+
+              {/* 할인 영역 */}
+              <DiscountSection
+                discountType={discountType}
+                setDiscountType={setDiscountType}
+                discountValue={discountValue}
+                setDiscountValue={setDiscountValue}
+              />
+
+              {/* 결과 영역 (메뉴가 하나라도 있을 때만) */}
+              {hasAnyMenu ? (
+                <ResultSection
+                  results={calc.results}
+                  totalBefore={calc.totalBefore}
+                  totalDiscount={calc.totalDiscount}
+                  totalAfter={calc.totalAfter}
+                />
+              ) : (
+                <div className="bg-white/60 rounded-2xl p-4 text-center text-sm text-gray-400">
+                  메뉴를 입력하면 정산 결과가 여기에 표시돼요 🍚
+                </div>
+              )}
+
+              <div className="h-2" />
+            </main>
+
+            {/* 하단 입력바 (카카오톡 메시지 입력창 느낌) - 참가자 추가 */}
+            <footer className="sticky bottom-0 bg-white border-t border-gray-100 px-3 py-2.5">
+              <div className="flex gap-2 items-center">
+                <input
+                  value={newName}
+                  onChange={(e) => { setNewName(e.target.value); setNameError(''); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addParticipant(); }}
+                  placeholder="참가자 이름 입력 (예: 철수)"
+                  className="flex-1 min-w-0 px-4 py-2.5 rounded-full border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-[#FEE500]"
+                />
+                <Button onClick={addParticipant} className="rounded-full px-5">추가</Button>
+              </div>
+              {nameError && <p className="text-xs text-red-400 mt-1 ml-3">{nameError}</p>}
+            </footer>
+
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 렌더링
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

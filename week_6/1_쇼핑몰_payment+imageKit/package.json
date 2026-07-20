@@ -1,0 +1,19 @@
+{
+  "name": "shop-auth",
+  "version": "1.0.0",
+  "description": "영유아 쇼핑몰 — email/password + JWT 인증 (Express + Supabase Postgres). 로그인 사용자만 이용, 상품 목록은 DB, 장바구니는 사용자별 저장. 결제 기능 없음.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.12.0"
+  }
+}
